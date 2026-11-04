@@ -12,7 +12,7 @@ A native Android coding assistant foundation built with Kotlin and Jetpack Compo
 - API keys encrypted with AES-256-GCM; encryption key is held in Android Keystore
 - Model-driven tool loop for OpenAI-compatible Chat Completions and Anthropic Messages APIs, with bounded rounds
 - Local workspace tools: list, read, search and approval-gated write
-- User approval dialog before every model-requested file write
+- User approval dialog before every model-requested file write, including an 800-character content preview
 - Bounded local conversation history (last 80 messages)
 - SAF folder import into the private workspace and ZIP export
 - User-cancellable agent jobs (network cancellation is best-effort while a provider socket is blocked)
