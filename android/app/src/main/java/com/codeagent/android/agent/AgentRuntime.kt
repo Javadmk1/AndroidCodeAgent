@@ -21,7 +21,8 @@ class AgentRuntime(
         conversation: List<Pair<String, String>>,
         approveWrite: suspend (String, String) -> Boolean,
         onText: suspend (String) -> Unit = {},
-        onActivity: suspend (String) -> Unit = {}
+        onActivity: suspend (String) -> Unit = {},
+        approveBuild: suspend (String) -> Boolean = { false }
     ): Result = withContext(Dispatchers.IO) {
         val anthropic = config.provider == "anthropic"
         val messages = JSONArray()
@@ -50,7 +51,7 @@ class AgentRuntime(
                     val name = use.optString("name")
                     val args = use.optJSONObject("input") ?: JSONObject()
                     onActivity("اجرای ابزار: $name")
-                    val result = registry.execute(name, args, approveWrite)
+                    val result = registry.execute(name, args, approveWrite, approveBuild, onActivity)
                     val logEntry = "$name: ${if (result.optBoolean("ok")) "انجام شد" else result.optString("error", "رد شد")}"
                     logs += logEntry
                     onActivity(logEntry)
@@ -285,7 +286,9 @@ class AgentRuntime(
         Triple("search_in_files", "Search text inside project files.",
             JSONObject("""{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string"}},"required":["query"]}""")),
         Triple("write_file", "Create or replace a UTF-8 text file. User approval is required.",
-            JSONObject("""{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"""))
+            JSONObject("""{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}""")),
+        Triple("build_project", "Run an approved Gradle task in the isolated Android SDK build service. Use assembleDebug to produce an APK. User approval is required.",
+            JSONObject("""{"type":"object","properties":{"task":{"type":"string","enum":["assembleDebug","testDebugUnitTest","lintDebug","check","tasks","clean"]}}}"""))
     )
 
     private fun anthropicTools(): JSONArray = JSONArray().apply {
