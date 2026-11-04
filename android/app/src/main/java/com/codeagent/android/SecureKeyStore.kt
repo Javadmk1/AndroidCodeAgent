@@ -39,14 +39,27 @@ class SecureKeyStore(context: Context) {
         val ivText = prefs.getString("${provider}_iv", null) ?: return null
         val bodyText = prefs.getString("${provider}_data", null) ?: return null
         return try {
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(
-                Cipher.DECRYPT_MODE,
-                getOrCreateKey(),
-                GCMParameterSpec(128, Base64.decode(ivText, Base64.NO_WRAP))
-            )
-            cipher.updateAAD(provider.toByteArray(Charsets.UTF_8))
-            String(cipher.doFinal(Base64.decode(bodyText, Base64.NO_WRAP)), Charsets.UTF_8)
+            val iv = Base64.decode(ivText, Base64.NO_WRAP)
+            val body = Base64.decode(bodyText, Base64.NO_WRAP)
+            val key = getOrCreateKey()
+
+            // New entries authenticate their provider id as AES-GCM additional data.
+            val authenticated = runCatching {
+                Cipher.getInstance(TRANSFORMATION).run {
+                    init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+                    updateAAD(provider.toByteArray(Charsets.UTF_8))
+                    String(doFinal(body), Charsets.UTF_8)
+                }
+            }.getOrNull()
+            if (authenticated != null) return authenticated
+
+            // Upgrade keys saved by earlier app versions (which did not use AAD).
+            val legacy = Cipher.getInstance(TRANSFORMATION).run {
+                init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+                String(doFinal(body), Charsets.UTF_8)
+            }
+            save(provider, legacy)
+            legacy
         } catch (_: Exception) {
             null
         }
