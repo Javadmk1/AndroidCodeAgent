@@ -89,7 +89,7 @@ class AgentRuntime(
             .put("tool_choice", "auto")
         val endpoint = config.baseUrl.trimEnd('/') + "/chat/completions"
         val connection = (URL(endpoint).openConnection() as HttpURLConnection)
-        try {
+        return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000
             connection.readTimeout = 120_000
