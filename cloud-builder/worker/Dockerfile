@@ -16,7 +16,7 @@ RUN mkdir -p ${ANDROID_HOME}/cmdline-tools && \
     rm /tmp/cmdline-tools.zip
 
 RUN yes | sdkmanager --licenses >/dev/null && \
-    sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+    sdkmanager "platform-tools" "platforms;android-34" "platforms;android-35" "platforms;android-36" "build-tools;34.0.0" "build-tools;35.0.0" "build-tools;36.0.0"
 
 RUN wget -q https://services.gradle.org/distributions/gradle-8.13-bin.zip -O /tmp/gradle.zip && \
     unzip -q /tmp/gradle.zip -d /opt && \
