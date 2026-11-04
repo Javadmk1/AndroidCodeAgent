@@ -54,6 +54,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var status by remember { mutableStateOf("API هنوز پیکربندی نشده است.") }
     val historyStore = remember(context) { ConversationStore(context) }
     var approvalPath by remember { mutableStateOf<String?>(null) }
+    var approvalPreview by remember { mutableStateOf("") }
     var approvalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     val scope = rememberCoroutineScope()
     val client = remember { LlmClient() }
@@ -138,12 +139,14 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                         config = config,
                                         apiKey = secret,
                                         conversation = history.map { it.role to it.content },
-                                        approveWrite = { path ->
+                                        approveWrite = { path, content ->
                                             val gate = CompletableDeferred<Boolean>()
                                             approvalPath = path
+                                            approvalPreview = content.take(800)
                                             approvalDecision = gate
                                             try { gate.await() } finally {
                                                 approvalPath = null
+                                                approvalPreview = ""
                                                 approvalDecision = null
                                             }
                                         }
@@ -189,7 +192,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         AlertDialog(
             onDismissRequest = { approvalDecision?.complete(false) },
             title = { Text("اجازهٔ تغییر فایل؟") },
-            text = { Text("مدل می‌خواهد این فایل را ایجاد یا جایگزین کند:\\n$approvalPath\\n\\nفقط اگر مسیر و تغییر را می‌شناسی تأیید کن.") },
+            text = { Text("مسیر: $approvalPath\\n\\nپیش‌نمایش محتوا (حداکثر ۸۰۰ نویسه):\\n$approvalPreview\\n\\nاگر مسیر و محتوا را بررسی نکرده‌ای، رد کن.") },
             confirmButton = { TextButton(onClick = { approvalDecision?.complete(true) }) { Text("تأیید نوشتن") } },
             dismissButton = { TextButton(onClick = { approvalDecision?.complete(false) }) { Text("رد") } }
         )
