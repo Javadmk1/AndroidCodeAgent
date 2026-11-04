@@ -3,6 +3,7 @@ package com.codeagent.android.agent
 import android.content.Context
 import android.net.Uri
 import java.io.File
+import java.util.UUID
 import java.net.HttpURLConnection
 import java.net.URL
 import org.json.JSONObject
@@ -37,4 +38,41 @@ class CloudBuildClient(private val context: Context) {
                 connection.disconnect()
             }
         }
+
+    suspend fun submitZip(endpoint: String, token: String, zipUri: Uri, projectDir: String): String =
+        withContext(Dispatchers.IO) {
+            val boundary = "----ACA" + UUID.randomUUID().toString().replace("-", "")
+            val connection = (URL(validateEndpoint(endpoint) + "/v1/builds").openConnection() as HttpURLConnection)
+            try {
+                connection.requestMethod = "POST"
+                connection.doOutput = true
+                connection.setChunkedStreamingMode(0)
+                connection.connectTimeout = 30000
+                connection.readTimeout = 120000
+                connection.setRequestProperty("Authorization", "Bearer " + token)
+                connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary)
+                connection.outputStream.use { output ->
+                    fun write(value: String) { output.write(value.toByteArray(Charsets.UTF_8)) }
+                    write("--$boundary\\r\\nContent-Disposition: form-data; name=\\"project_dir\\"\\r\\n\\r\\n$projectDir\\r\\n")
+                    write("--$boundary\\r\\nContent-Disposition: form-data; name=\\"file\\"; filename=\\"project.zip\\"\\r\\nContent-Type: application/zip\\r\\n\\r\\n")
+                    context.contentResolver.openInputStream(zipUri)?.use { input ->
+                        val buffer = ByteArray(32768)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                        }
+                    } ?: error("Could not read ZIP file")
+                    write("\\r\\n--$boundary--\\r\\n")
+                }
+                val code = connection.responseCode
+                val body = (if (code in 200..299) connection.inputStream else connection.errorStream)
+                    ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) error("Build service error $code: ${body.take(800)}")
+                JSONObject(body).getString("build_id")
+            } finally {
+                connection.disconnect()
+            }
+        }
+
 }
