@@ -1,7 +1,7 @@
 name: Android debug build
 on:
   push:
-    branches: [ main, ui/mobile-agent-workspace ]
+    branches: [ main, ui/mobile-agent-workspace, feature/multi-project-sandbox-build ]
   workflow_dispatch:
 permissions:
   contents: read
