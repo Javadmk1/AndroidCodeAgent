@@ -36,7 +36,15 @@ The app does not include API credits. Provider charges and rate limits still app
 
 ## Build APK
 
-GitHub Actions builds a debug APK on pushes to `main` and manual workflow dispatch. Open the Actions tab, select a successful run, and download the `android-code-agent-debug` artifact.
+GitHub Actions runs unit tests and builds a debug APK on pushes to `main` and manual workflow dispatch. Open the Actions tab, select a successful run, and download the `android-code-agent-debug` artifact.
+
+A signed release APK is built only when all four repository Actions secrets are configured:
+- `ANDROID_KEYSTORE_BASE64`: Base64-encoded Java keystore file
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Keep the original keystore and passwords backed up securely. Losing the signing key can prevent future updates from being accepted as updates to the same app. Never commit the keystore or passwords to the repository. Without these secrets, CI skips the signed release and still produces the debug APK.
 
 ## Security boundaries and current limitations
 
@@ -46,7 +54,8 @@ GitHub Actions builds a debug APK on pushes to `main` and manual workflow dispat
 - Arbitrary shell execution is deliberately not enabled.
 - Model-driven tools are supported for OpenAI-compatible Chat Completions and Anthropic Messages. Some third-party compatible gateways may not implement tool calling correctly.
 - Imported projects are copied into an app-private workspace. Import/export is bounded to 100 MB and 5,000 files; hidden folders, .git, .gradle and build outputs are skipped.
-- On-device Gradle/Android SDK build worker, APK signing/release flow, and automated repair loop are not implemented yet.
+- Building an imported third-party Android project into an APK directly on the phone is not implemented. Import/export is available; APK compilation still requires a configured build environment.
+- Release signing is supported by CI when the owner configures the four signing secrets described above; no signing key is bundled in the app.
 - Conversation history uses bounded app-private SharedPreferences JSON, not Room.
 
 Do not commit API keys, signing keys, or local machine configuration.
