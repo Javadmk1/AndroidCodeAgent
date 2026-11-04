@@ -33,7 +33,7 @@ class CloudBuildClient(private val context: Context) {
             val code = connection.responseCode
             val body = (if (code in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) error("SDK environment error $code: \${body.take(500)}")
+            if (code !in 200..299) error("SDK environment error $code: ${body.take(500)}")
             JSONObject(body).optString("output")
         } finally { connection.disconnect() }
     }
