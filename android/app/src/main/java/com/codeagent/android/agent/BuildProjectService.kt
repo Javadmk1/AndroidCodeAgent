@@ -25,7 +25,7 @@ class BuildProjectService(
         client.validateTask(task)
         require(project.isDirectory) { "پوشه پروژه وجود ندارد." }
 
-        val archive = File(context.cacheDir, "agent-project-\${System.currentTimeMillis()}.zip")
+        val archive = File(context.cacheDir, "agent-project-${System.currentTimeMillis()}.zip")
         try {
             onActivity("آماده‌سازی فایل‌های پروژه برای ساخت امن...")
             createArchive(project, archive)
@@ -39,8 +39,8 @@ class BuildProjectService(
                     onActivity(log.substring(previousLog.length).trim().takeLast(2500))
                     previousLog = log
                 }
-                onActivity("وضعیت ساخت: \${state.status} · دستور: $task")
-                if (state.status == "failed") error("Gradle $task ناموفق بود: \${state.error ?: "خطای نامشخص"}")
+                onActivity("وضعیت ساخت: ${state.status} · دستور: $task")
+                if (state.status == "failed") error("Gradle $task ناموفق بود: ${state.error ?: "خطای نامشخص"}")
                 if (state.status == "completed") {
                     if (task == "assembleDebug") {
                         require(state.artifactReady) { "ساخت تمام شد اما APK خروجی آماده نیست." }
@@ -54,7 +54,7 @@ class BuildProjectService(
                             array
                         }
                         require(entries.length() > 0) { "فایل ZIP دریافت شد اما APK داخل آن وجود ندارد." }
-                        onActivity("APK ساخته و دریافت شد: \${entries.length()} فایل")
+                        onActivity("APK ساخته و دریافت شد: ${entries.length()} فایل")
                         return JSONObject().put("ok", true).put("task", task)
                             .put("artifact", finalArtifact.name).put("artifact_size", finalArtifact.length())
                             .put("apks", entries).put("build_id", buildId)
