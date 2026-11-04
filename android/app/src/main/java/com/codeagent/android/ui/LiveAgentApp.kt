@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,6 +51,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var prompt by remember { mutableStateOf("") }
     var settings by remember { mutableStateOf(false) }
     var showWorkspace by remember { mutableStateOf(false) }
+    var confirmClearHistory by remember { mutableStateOf(false) }
+    var confirmDeleteKey by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var transferBusy by remember { mutableStateOf(false) }
     var activeJob by remember { mutableStateOf<Job?>(null) }
@@ -110,6 +113,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                 actions = {
                     IconButton(onClick = { importLauncher.launch(null) }, enabled = !transferBusy) { Icon(Icons.Default.FolderOpen, "وارد کردن پوشه پروژه") }
                     IconButton(onClick = { showWorkspace = true }) { Icon(Icons.Default.Folder, "مرور و ویرایش فایل‌های پروژه") }
+                    IconButton(onClick = { confirmClearHistory = true }, enabled = !busy) { Icon(Icons.Default.Delete, "پاک کردن تاریخچه گفتگو") }
                     IconButton(onClick = { exportLauncher.launch("android-code-agent-project.zip") }, enabled = !transferBusy) { Icon(Icons.Default.Archive, "خروجی ZIP پروژه") }
                     IconButton(onClick = { provider=config.provider; model=config.model; endpoint=config.baseUrl; apiKey=""; settings=true }) { Icon(Icons.Default.Settings, "تنظیمات") }
                 }
@@ -193,6 +197,36 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
 
     if (showWorkspace) WorkspaceBrowser(workspaceDirectory) { showWorkspace = false }
 
+    if (confirmClearHistory) {
+        AlertDialog(
+            onDismissRequest = { confirmClearHistory = false },
+            title = { Text("پاک کردن تاریخچه؟") },
+            text = { Text("همه پیام‌های ذخیره‌شده این گفتگو از حافظه برنامه حذف می‌شوند.") },
+            confirmButton = { TextButton(onClick = {
+                lines.clear()
+                lines.add(LiveLine("assistant", "تاریخچه پاک شد. درخواست برنامه‌نویسی جدیدت را بنویس."))
+                historyStore.clear()
+                confirmClearHistory = false
+                status = "تاریخچه گفتگو پاک شد."
+            }) { Text("پاک کن") } },
+            dismissButton = { TextButton(onClick = { confirmClearHistory = false }) { Text("انصراف") } }
+        )
+    }
+
+    if (confirmDeleteKey) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteKey = false },
+            title = { Text("حذف کلید API؟") },
+            text = { Text("کلید رمزنگاری‌شده سرویس «${config.provider}» از این دستگاه حذف می‌شود.") },
+            confirmButton = { TextButton(onClick = {
+                keys.delete(config.provider)
+                confirmDeleteKey = false
+                status = "کلید API این سرویس حذف شد."
+            }) { Text("حذف کلید") } },
+            dismissButton = { TextButton(onClick = { confirmDeleteKey = false }) { Text("انصراف") } }
+        )
+    }
+
     if (approvalPath != null) {
         AlertDialog(
             onDismissRequest = { approvalDecision?.complete(false) },
@@ -215,6 +249,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                     OutlinedTextField(endpoint,{endpoint=it},label={Text("Base URL (HTTPS)")},singleLine=true)
                     OutlinedTextField(apiKey,{apiKey=it},label={Text("API Key")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password),singleLine=true)
                     Text("کلید با Android Keystore رمزنگاری می‌شود. ابزارهای عامل از APIهای سازگار با OpenAI و Anthropic Messages پشتیبانی می‌کنند.", style=MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { confirmDeleteKey = true }, enabled = keys.hasKey(config.provider)) { Text("حذف کلید ذخیره‌شده این سرویس") }
                 }
             },
             confirmButton={
