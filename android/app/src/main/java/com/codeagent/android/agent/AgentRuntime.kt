@@ -85,18 +85,26 @@ class AgentRuntime(
 
 
     private fun multimodalContent(raw: String, anthropic: Boolean): Any {
-        val marker = Regex("""\\[\\[IMAGE:([a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+):([A-Za-z0-9+/=]+)]]""")
-        val matches = marker.findAll(raw).toList()
-        if (matches.isEmpty()) return raw
-        val text = marker.replace(raw, "").trim()
-        val blocks = JSONArray()
-        if (text.isNotBlank()) {
-            if (anthropic) blocks.put(JSONObject().put("type", "text").put("text", text))
-            else blocks.put(JSONObject().put("type", "text").put("text", text))
+        var remaining = raw
+        val images = mutableListOf<Pair<String, String>>()
+        while (true) {
+            val start = remaining.indexOf("[[IMAGE:")
+            if (start < 0) break
+            val end = remaining.indexOf("]]", start)
+            if (end < 0) break
+            val payload = remaining.substring(start + 8, end)
+            val separator = payload.indexOf(':')
+            if (separator > 0) {
+                val mime = payload.substring(0, separator)
+                val data = payload.substring(separator + 1)
+                if (mime.startsWith("image/") && data.isNotBlank()) images += mime to data
+            }
+            remaining = remaining.removeRange(start, end + 2)
         }
-        matches.forEach { match ->
-            val mime = match.groupValues[1]
-            val data = match.groupValues[2]
+        if (images.isEmpty()) return raw
+        val blocks = JSONArray()
+        if (remaining.isNotBlank()) blocks.put(JSONObject().put("type", "text").put("text", remaining.trim()))
+        images.forEach { (mime, data) ->
             if (anthropic) {
                 blocks.put(JSONObject().put("type", "image").put("source",
                     JSONObject().put("type", "base64").put("media_type", mime).put("data", data)))
