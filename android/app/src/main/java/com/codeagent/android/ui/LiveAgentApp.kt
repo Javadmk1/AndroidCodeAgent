@@ -82,7 +82,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             try {
                 context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 val result = transfer.importTree(uri)
-                status = "ورود پروژه انجام شد: ${result.files} فایل"
+                status = "پروژه با موفقیت جایگزین شد: ${result.files} فایل"
                 Toast.makeText(context, status, Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 status = "خطای ورود پروژه: ${e.message ?: "نامشخص"}"
