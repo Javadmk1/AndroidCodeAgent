@@ -298,7 +298,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
 
     if (showWorkspace) WorkspaceBrowser(workspaceDirectory) { showWorkspace = false }
     if (showHtmlPreview && !htmlPreview.isNullOrBlank()) HtmlPreviewDialog(htmlPreview, onDismiss = { showHtmlPreview = false })
-    if (showBuildManager) BuildManagerDialog(onDismiss = { showBuildManager = false })
+    if (showBuildManager) BuildManagerDialog(keys = keys, onDismiss = { showBuildManager = false })
 
     if (confirmClearHistory) {
         AlertDialog(
