@@ -45,7 +45,10 @@ fun BuildManagerDialog(
     var cloudProjectDir by remember { mutableStateOf(".") }
     var zipUri by remember { mutableStateOf<Uri?>(null) }
     var buildId by remember { mutableStateOf<String?>(null) }
-    var artifactFile by remember { mutableStateOf<File?>(null) }
+    var artifactFile by remember { mutableStateOf(File(context.cacheDir, "last-cloud-build.zip").takeIf { it.isFile }) }
+    var apkEntries by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedApk by remember { mutableStateOf<String?>(null) }
+    var apkMenu by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("سرویس ابری هنوز پیکربندی نشده است.") }
     var buildLog by remember { mutableStateOf("") }
@@ -57,9 +60,10 @@ fun BuildManagerDialog(
         artifactFile?.let { file ->
             artifactSummary = runCatching {
                 ZipFile(file).use { zip ->
-                    val entries = zip.entries().asSequence().filter { !it.isDirectory && it.name.endsWith(".apk", true) }
-                        .map { "${it.name} · ${it.size} بایت" }.toList()
-                    if (entries.isEmpty()) "در ZIP فایل APK پیدا نشد." else entries.joinToString("\n")
+                    val entries = zip.entries().asSequence().filter { !it.isDirectory && it.name.endsWith(".apk", true) }.toList()
+                    apkEntries = entries.map { it.name }
+                    if (selectedApk !in apkEntries) selectedApk = apkEntries.firstOrNull()
+                    if (entries.isEmpty()) "در ZIP فایل APK پیدا نشد." else entries.joinToString("\n") { "${it.name} · ${it.size} بایت" }
                 }
             }.getOrElse { "فهرست APKها قابل خواندن نیست: ${it.message ?: "خطای ZIP"}" }
             onBuildOutput("خروجی: ${file.name} · ${file.length()} بایت\n" + artifactSummary)
@@ -73,6 +77,25 @@ fun BuildManagerDialog(
             status = "فایل ZIP انتخاب شد."
         }
     }
+    val saveApk = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")) { uri ->
+        val source = artifactFile
+        val entryName = selectedApk
+        if (uri != null && source != null && entryName != null) scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    ZipFile(source).use { zip ->
+                        val entry = zip.getEntry(entryName) ?: error("APK entry not found")
+                        zip.getInputStream(entry).use { input ->
+                            context.contentResolver.openOutputStream(uri)?.use { output -> input.copyTo(output) }
+                                ?: error("فایل APK ذخیره نشد.")
+                        }
+                    }
+                }
+                status = "فایل APK ذخیره شد."
+            } catch (e: Exception) { status = "خطا در ذخیره APK: ${e.message ?: "نامشخص"}" }
+        }
+    }
+
     val saveArtifact = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         val source = artifactFile
         if (uri != null && source != null) scope.launch {
@@ -159,10 +182,12 @@ fun BuildManagerDialog(
                             buildLog = ""
                             artifactFile = null
                             try {
-                                val token = keys.read("cloud_builder") ?: cloudToken.trim()
-                                val endpoint = prefs.getString("endpoint", null) ?: cloudEndpoint.trim().trimEnd('/')
+                                val token = cloudToken.trim()
+                                val endpoint = client.validateEndpoint(cloudEndpoint)
                                 val selected = zipUri ?: error("ابتدا فایل ZIP پروژه را انتخاب کن.")
                                 require(token.isNotBlank()) { "توکن سرویس ساخت ذخیره نشده است." }
+                                keys.save("cloud_builder", token)
+                                prefs.edit().putString("endpoint", endpoint).commit()
                                 status = "در حال بارگذاری پروژه..."
                                 val id = client.submitZip(endpoint, token, selected, cloudProjectDir.trim(), task)
                                 buildId = id
@@ -203,8 +228,23 @@ fun BuildManagerDialog(
                 if (artifactFile != null) {
                     Text("فایل‌های APK داخل خروجی:", style = MaterialTheme.typography.titleSmall)
                     Text(artifactSummary, style = MaterialTheme.typography.bodySmall)
-                    Button(onClick = { saveArtifact.launch("android-code-agent-apks.zip") }, modifier = Modifier.fillMaxWidth()) {
-                        Text("ذخیره ZIP شامل APKها")
+                    if (apkEntries.isNotEmpty()) {
+                        Box {
+                            OutlinedButton(onClick = { apkMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text(selectedApk?.substringAfterLast('/') ?: "انتخاب APK")
+                            }
+                            DropdownMenu(expanded = apkMenu, onDismissRequest = { apkMenu = false }) {
+                                apkEntries.forEach { entry ->
+                                    DropdownMenuItem(text = { Text(entry.substringAfterLast('/')) }, onClick = { selectedApk = entry; apkMenu = false })
+                                }
+                            }
+                        }
+                        Button(onClick = { saveApk.launch(selectedApk?.substringAfterLast('/') ?: "app-debug.apk") }, modifier = Modifier.fillMaxWidth()) {
+                            Text("ذخیره فایل APK")
+                        }
+                    }
+                    OutlinedButton(onClick = { saveArtifact.launch("android-code-agent-apks.zip") }, modifier = Modifier.fillMaxWidth()) {
+                        Text("ذخیره ZIP کامل خروجی")
                     }
                 }
                 Text(status, style = MaterialTheme.typography.bodySmall)
