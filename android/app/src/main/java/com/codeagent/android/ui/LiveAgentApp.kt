@@ -23,6 +23,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -83,12 +86,20 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var showHtmlPreview by remember { mutableStateOf(false) }
     var showBuildManager by remember { mutableStateOf(false) }
     var confirmClearHistory by remember { mutableStateOf(false) }
+    var showConversationList by remember { mutableStateOf(false) }
+    var renameConversationId by remember { mutableStateOf<String?>(null) }
+    var renameConversationText by remember { mutableStateOf("") }
+    var deletingConversationId by remember { mutableStateOf<String?>(null) }
     var confirmDeleteKey by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var transferBusy by remember { mutableStateOf(false) }
     var activeJob by remember { mutableStateOf<Job?>(null) }
     var status by remember { mutableStateOf("API هنوز پیکربندی نشده است.") }
-    val historyStore = remember(context) { ConversationStore(context) }
+    val historyStore = remember(context) { MultiConversationStore(context) }
+    val initialConversations = remember(historyStore) { historyStore.loadAll().ifEmpty { listOf(historyStore.create()) } }
+    var conversations by remember { mutableStateOf(initialConversations) }
+    var activeConversationId by remember { mutableStateOf(initialConversations.first().id) }
+    val activeConversationTitle = conversations.firstOrNull { it.id == activeConversationId }?.title ?: "گفتگوی جدید"
     var approvalPath by remember { mutableStateOf<String?>(null) }
     var approvalPreview by remember { mutableStateOf("") }
     var approvalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
@@ -99,10 +110,11 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     val runtime = remember(context) {
         AgentRuntime(ToolRegistry(WorkspaceTools(workspaceDirectory)))
     }
-    val lines = remember(historyStore) {
+    val lines = remember(historyStore, activeConversationId) {
         mutableStateListOf<LiveLine>().apply {
-            addAll(historyStore.load().map { LiveLine(it.role, it.content) })
-            if (isEmpty()) add(LiveLine("assistant", "سلام. درخواستت را بنویس؛ ابزارهای پروژه در فضای داخلی برنامه اجرا می‌شوند."))
+            val selected = conversations.firstOrNull { it.id == activeConversationId }
+            addAll(selected?.messages.orEmpty().map { LiveLine(it.role, it.content) })
+            if (isEmpty()) add(LiveLine("assistant", "سلام. گفتگوی جدید آماده است؛ درخواستت را بنویس."))
         }
     }
     val htmlPreview = lines.lastOrNull { it.role == "assistant" }?.text?.let { message ->
@@ -110,7 +122,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             ?: message.takeIf { it.contains("<html", true) || it.contains("<!doctype html", true) }
     }
     fun persistHistory() {
-        historyStore.save(lines.map { ChatMessage(it.role, it.text) })
+        historyStore.save(activeConversationId, activeConversationTitle, lines.map { ChatMessage(it.role, it.text) })
+        conversations = historyStore.loadAll()
     }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -189,6 +202,18 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             TopAppBar(
                 title = { Column { Text("Android Code Agent"); Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall) } },
                 actions = {
+                    IconButton(onClick = { showConversationList = true }, enabled = !busy) { Icon(Icons.Default.Forum, "فهرست گفتگوها") }
+                    IconButton(onClick = {
+                        persistHistory()
+                        val created = historyStore.create()
+                        conversations = historyStore.loadAll()
+                        activeConversationId = created.id
+                        prompt = ""
+                        pendingImageData = null
+                        pendingImageMime = null
+                        pendingAttachmentName = null
+                        status = "گفتگوی جدید ساخته شد."
+                    }, enabled = !busy) { Icon(Icons.Default.Add, "گفتگوی جدید") }
                     IconButton(onClick = { importLauncher.launch(null) }, enabled = !transferBusy) { Icon(Icons.Default.FolderOpen, "وارد کردن پوشه پروژه") }
                     IconButton(onClick = { showWorkspace = true }) { Icon(Icons.Default.Folder, "مرور و ویرایش فایل‌های پروژه") }
                     IconButton(onClick = { showHtmlPreview = true }, enabled = !htmlPreview.isNullOrBlank()) { Icon(Icons.Default.Code, "پیش‌نمایش HTML") }
@@ -296,6 +321,112 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         }
     }
 
+    if (showConversationList) {
+        AlertDialog(
+            onDismissRequest = { showConversationList = false },
+            title = { Text("گفتگوهای من") },
+            text = {
+                Column(Modifier.heightIn(max = 440.dp)) {
+                    Button(onClick = {
+                        persistHistory()
+                        val created = historyStore.create()
+                        conversations = historyStore.loadAll()
+                        activeConversationId = created.id
+                        prompt = ""
+                        pendingImageData = null
+                        pendingImageMime = null
+                        pendingAttachmentName = null
+                        showConversationList = false
+                        status = "گفتگوی جدید ساخته شد."
+                    }, modifier = Modifier.fillMaxWidth(), enabled = !busy) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("ساخت گفتگوی جدید")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    LazyColumn {
+                        items(conversations, key = { it.id }) { item ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(
+                                    onClick = {
+                                        if (item.id != activeConversationId) {
+                                            persistHistory()
+                                            activeConversationId = item.id
+                                            prompt = ""
+                                            pendingImageData = null
+                                            pendingImageMime = null
+                                            pendingAttachmentName = null
+                                        }
+                                        showConversationList = false
+                                        status = "گفتگوی «\${item.title}» باز شد."
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = !busy
+                                ) {
+                                    Column(Modifier.fillMaxWidth()) {
+                                        Text(item.title, maxLines = 1)
+                                        Text("\${item.messages.count { it.role == "user" }} پیام · \${if (item.id == activeConversationId) "فعال" else "ذخیره‌شده"}",
+                                            style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                IconButton(onClick = {
+                                    renameConversationId = item.id
+                                    renameConversationText = item.title
+                                }, enabled = !busy) { Icon(Icons.Default.Edit, "تغییر نام گفتگو") }
+                                IconButton(onClick = { deletingConversationId = item.id }, enabled = !busy) {
+                                    Icon(Icons.Default.Delete, "حذف گفتگو")
+                                }
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showConversationList = false }) { Text("بستن") } }
+        )
+    }
+
+    if (renameConversationId != null) {
+        AlertDialog(
+            onDismissRequest = { renameConversationId = null },
+            title = { Text("تغییر نام گفتگو") },
+            text = { OutlinedTextField(renameConversationText, { renameConversationText = it },
+                label = { Text("نام گفتگو") }, singleLine = true) },
+            confirmButton = { TextButton(onClick = {
+                historyStore.rename(renameConversationId!!, renameConversationText)
+                conversations = historyStore.loadAll()
+                renameConversationId = null
+            }) { Text("ذخیره") } },
+            dismissButton = { TextButton(onClick = { renameConversationId = null }) { Text("انصراف") } }
+        )
+    }
+
+    if (deletingConversationId != null) {
+        AlertDialog(
+            onDismissRequest = { deletingConversationId = null },
+            title = { Text("حذف گفتگو؟") },
+            text = { Text("پیام‌های این گفتگو برای همیشه از حافظه برنامه حذف می‌شوند.") },
+            confirmButton = { TextButton(onClick = {
+                val target = deletingConversationId!!
+                historyStore.delete(target)
+                var remaining = historyStore.loadAll()
+                if (remaining.isEmpty()) {
+                    historyStore.create()
+                    remaining = historyStore.loadAll()
+                }
+                conversations = remaining
+                if (target == activeConversationId) {
+                    activeConversationId = remaining.first().id
+                    prompt = ""
+                }
+                deletingConversationId = null
+                showConversationList = false
+                status = "گفتگو حذف شد."
+            }) { Text("حذف") } },
+            dismissButton = { TextButton(onClick = { deletingConversationId = null }) { Text("انصراف") } }
+        )
+    }
+
     if (showWorkspace) WorkspaceBrowser(workspaceDirectory) { showWorkspace = false }
     if (showHtmlPreview && !htmlPreview.isNullOrBlank()) HtmlPreviewDialog(htmlPreview, onDismiss = { showHtmlPreview = false })
     if (showBuildManager) BuildManagerDialog(keys = keys, onDismiss = { showBuildManager = false })
@@ -308,7 +439,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             confirmButton = { TextButton(onClick = {
                 lines.clear()
                 lines.add(LiveLine("assistant", "تاریخچه پاک شد. درخواست برنامه‌نویسی جدیدت را بنویس."))
-                historyStore.clear()
+                historyStore.save(activeConversationId, activeConversationTitle, lines.map { ChatMessage(it.role, it.text) })
+                conversations = historyStore.loadAll()
                 confirmClearHistory = false
                 status = "تاریخچه گفتگو پاک شد."
             }) { Text("پاک کن") } },
