@@ -75,4 +75,26 @@ class CloudBuildClient(private val context: Context) {
             }
         }
 
+
+    suspend fun downloadArtifact(endpoint: String, token: String, buildId: String): File =
+        withContext(Dispatchers.IO) {
+            val connection = (URL(validateEndpoint(endpoint) + "/v1/builds/" + buildId + "/artifact").openConnection() as HttpURLConnection)
+            try {
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("Authorization", "Bearer " + token)
+                connection.connectTimeout = 15000
+                connection.readTimeout = 120000
+                val code = connection.responseCode
+                if (code !in 200..299) {
+                    val body = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    error("Artifact download failed $code: ${body.take(500)}")
+                }
+                val file = File(context.cacheDir, "cloud-build-" + buildId + ".zip")
+                connection.inputStream.use { input -> file.outputStream().use { input.copyTo(it) } }
+                file
+            } finally {
+                connection.disconnect()
+            }
+        }
+
 }
