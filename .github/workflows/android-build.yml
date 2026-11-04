@@ -24,6 +24,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      - name: Run unit tests
+        run: gradle -p android --no-daemon testDebugUnitTest
       - name: Build debug APK
         run: gradle -p android --no-daemon assembleDebug
       - name: Upload APK
