@@ -1,6 +1,10 @@
 package com.codeagent.android.ui
 
+import android.content.Context
 import com.codeagent.android.SecureKeyStore
+import com.codeagent.android.agent.AgentRuntime
+import com.codeagent.android.agent.ToolRegistry
+import com.codeagent.android.agent.WorkspaceTools
 import com.codeagent.android.llm.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,17 +18,21 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import java.io.File
 
 private data class LiveLine(val role: String, val text: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
+    val context = LocalContext.current
     var config by remember { mutableStateOf(configs.load()) }
     var provider by remember { mutableStateOf(config.provider) }
     var model by remember { mutableStateOf(config.model) }
@@ -34,9 +42,14 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var settings by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("API هنوز پیکربندی نشده است.") }
+    var approvalPath by remember { mutableStateOf<String?>(null) }
+    var approvalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     val scope = rememberCoroutineScope()
     val client = remember { LlmClient() }
-    val lines = remember { mutableStateListOf(LiveLine("assistant", "سلام. اتصال زندهٔ مدل آمادهٔ پیکربندی است.")) }
+    val runtime = remember(context) {
+        AgentRuntime(ToolRegistry(WorkspaceTools(File(context.filesDir, "workspace"))))
+    }
+    val lines = remember { mutableStateListOf(LiveLine("assistant", "سلام. درخواستت را بنویس؛ ابزارهای پروژه در فضای داخلی برنامه اجرا می‌شوند.")) }
 
     Scaffold(
         topBar = {
@@ -59,21 +72,44 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                             lines.add(LiveLine("user",question))
                             lines.add(LiveLine("assistant",""))
                             busy=true
-                            status="در حال اتصال به ${config.provider}..."
+                            status="در حال پردازش درخواست..."
                             val history=lines.dropLast(1).map { ChatMessage(it.role,it.text) }
                             scope.launch {
-                                var response=""
-                                client.stream(config,secret,history)
-                                    .catch { e ->
-                                        lines[lines.lastIndex]=LiveLine("assistant","خطای API: ${e.message ?: "نامشخص"}")
-                                        status="درخواست ناموفق بود؛ کلید، مدل، endpoint و سهمیه را بررسی کن."
+                                try {
+                                    if (config.provider == "anthropic") {
+                                        var response=""
+                                        client.stream(config,secret,history).collect { part ->
+                                            response += part
+                                            lines[lines.lastIndex]=LiveLine("assistant",response)
+                                        }
+                                    } else {
+                                        val result = runtime.run(
+                                            config = config,
+                                            apiKey = secret,
+                                            conversation = history.map { it.role to it.content },
+                                            approveWrite = { path ->
+                                                val gate = CompletableDeferred<Boolean>()
+                                                approvalPath = path
+                                                approvalDecision = gate
+                                                try { gate.await() } finally {
+                                                    approvalPath = null
+                                                    approvalDecision = null
+                                                }
+                                            }
+                                        )
+                                        val toolSummary = if (result.toolLog.isEmpty()) "" else
+                                            "
+
+گزارش ابزارها:
+" + result.toolLog.joinToString("
+")
+                                        lines[lines.lastIndex]=LiveLine("assistant",result.answer + toolSummary)
                                     }
-                                    .collect { part ->
-                                        response+=part
-                                        lines[lines.lastIndex]=LiveLine("assistant",response)
-                                    }
-                                if(response.isNotEmpty()) status="پاسخ دریافت شد."
-                                busy=false
+                                    status="درخواست به پایان رسید."
+                                } catch(e:Exception) {
+                                    lines[lines.lastIndex]=LiveLine("assistant","خطا: ${e.message ?: "نامشخص"}")
+                                    status="درخواست ناموفق بود؛ مدل، کلید، endpoint و پشتیبانی ابزارها را بررسی کن."
+                                } finally { busy=false }
                             }
                         }
                     }
@@ -97,6 +133,19 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         }
     }
 
+    if (approvalPath != null) {
+        AlertDialog(
+            onDismissRequest = { approvalDecision?.complete(false) },
+            title = { Text("اجازهٔ تغییر فایل؟") },
+            text = { Text("مدل می‌خواهد این فایل را ایجاد یا جایگزین کند:
+$approvalPath
+
+فقط اگر مسیر و تغییر را می‌شناسی تأیید کن.") },
+            confirmButton = { TextButton(onClick = { approvalDecision?.complete(true) }) { Text("تأیید نوشتن") } },
+            dismissButton = { TextButton(onClick = { approvalDecision?.complete(false) }) { Text("رد") } }
+        )
+    }
+
     if(settings) {
         AlertDialog(
             onDismissRequest={settings=false},
@@ -108,7 +157,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                     OutlinedTextField(model,{model=it},label={Text("Model")},singleLine=true)
                     OutlinedTextField(endpoint,{endpoint=it},label={Text("Base URL (HTTPS)")},singleLine=true)
                     OutlinedTextField(apiKey,{apiKey=it},label={Text("API Key")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password),singleLine=true)
-                    Text("کلید با Android Keystore رمزنگاری می‌شود. برای سازگاری، endpoint باید API مربوط به /v1 باشد.", style=MaterialTheme.typography.bodySmall)
+                    Text("کلید با Android Keystore رمزنگاری می‌شود. ابزارهای عامل فعلاً با APIهای سازگار با OpenAI کار می‌کنند؛ Anthropic در حالت چت عادی است.", style=MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton={
