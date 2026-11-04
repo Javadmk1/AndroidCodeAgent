@@ -14,8 +14,14 @@ data class CloudBuildStatus(val status: String, val log: String, val error: Stri
 
 class CloudBuildClient(private val context: Context) {
     fun validateEndpoint(endpoint: String): String {
-        require(endpoint.startsWith("https://")) { "HTTPS endpoint required" }
-        return endpoint.trimEnd('/')
+        val uri = URL(endpoint.trim()).toURI()
+        require(uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()) {
+            "یک نشانی HTTPS معتبر برای سرویس ساخت وارد کن."
+        }
+        require(uri.userInfo == null && uri.query == null && uri.fragment == null) {
+            "نشانی سرویس نباید شامل اطلاعات ورود، query یا fragment باشد."
+        }
+        return uri.toString().trimEnd('/')
     }
 
     fun validateTask(task: String): String {
