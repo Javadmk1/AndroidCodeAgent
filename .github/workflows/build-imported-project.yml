@@ -1,0 +1,105 @@
+name: Build imported Android project
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Public GitHub repository in owner/name form
+        required: true
+        type: string
+      ref:
+        description: Branch, tag or commit to build
+        required: true
+        default: main
+        type: string
+      project_dir:
+        description: Project folder inside the repository (use . for repository root)
+        required: true
+        default: .
+        type: string
+      gradle_task:
+        description: Gradle task, normally assembleDebug
+        required: true
+        default: assembleDebug
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Validate build inputs
+        shell: bash
+        env:
+          SOURCE_REPOSITORY: ${{ inputs.repository }}
+          SOURCE_REF: ${{ inputs.ref }}
+          PROJECT_DIR: ${{ inputs.project_dir }}
+          GRADLE_TASK: ${{ inputs.gradle_task }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "repository must be owner/name"; exit 1; }
+          [[ -n "$SOURCE_REF" && "$SOURCE_REF" != -* && "$SOURCE_REF" != *".."* ]] || { echo "Invalid ref"; exit 1; }
+          [[ "$PROJECT_DIR" == "." || ( "$PROJECT_DIR" != /* && "$PROJECT_DIR" != *".."* && "$PROJECT_DIR" =~ ^[A-Za-z0-9_./-]+$ ) ]] || { echo "Invalid project directory"; exit 1; }
+          [[ "$GRADLE_TASK" =~ ^[A-Za-z0-9:_-]+$ ]] || { echo "Invalid Gradle task"; exit 1; }
+
+      - name: Checkout public source project
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+          path: source
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+          cache-disabled: true
+
+      - name: Build APK
+        shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir }}
+          GRADLE_TASK: ${{ inputs.gradle_task }}
+        run: |
+          set -euo pipefail
+          cd "source/$PROJECT_DIR"
+          if [[ -x ./gradlew ]]; then
+            ./gradlew --no-daemon "$GRADLE_TASK"
+          else
+            gradle --no-daemon "$GRADLE_TASK"
+          fi
+
+      - name: Collect APK outputs
+        id: collect
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-output
+          find source -type f -path '*/build/outputs/apk/*/*.apk' -not -path '*/build/outputs/apk/androidTest/*' -exec cp --parents {} build-output/ \;
+          if ! find build-output -type f -name '*.apk' -print -quit | grep -q .; then
+            echo "No APK was produced. Check the Gradle task and project configuration."
+            exit 1
+          fi
+          find build-output -type f -name '*.apk' -print
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: imported-project-apks
+          path: build-output/
+          if-no-files-found: error
+          retention-days: 14
