@@ -18,6 +18,16 @@ class ProviderConfigStore(context: Context) {
         baseUrl = prefs.getString("base_url", "https://api.openai.com/v1") ?: "https://api.openai.com/v1"
     )
 
+    fun loadProfiles(): List<ProviderConfig> {
+        val ids = prefs.getStringSet("profile_ids", emptySet()).orEmpty()
+        val saved = ids.mapNotNull { id ->
+            val model = prefs.getString("profile_${id}_model", null) ?: return@mapNotNull null
+            val url = prefs.getString("profile_${id}_url", null) ?: return@mapNotNull null
+            ProviderConfig(id, model, url)
+        }
+        return if (saved.isEmpty()) listOf(load()) else saved
+    }
+
     fun save(config: ProviderConfig) {
         val provider = config.provider.trim()
         val model = config.model.trim()
@@ -31,10 +41,15 @@ class ProviderConfigStore(context: Context) {
         require(uri.userInfo == null && uri.query == null && uri.fragment == null) {
             "API endpoint cannot contain username, password, query parameters or fragments."
         }
+        val ids = prefs.getStringSet("profile_ids", emptySet()).orEmpty().toMutableSet()
+        ids.add(provider)
         prefs.edit()
             .putString("provider", provider)
             .putString("model", model)
             .putString("base_url", endpoint)
+            .putString("profile_${provider}_model", model)
+            .putString("profile_${provider}_url", endpoint)
+            .putStringSet("profile_ids", ids)
             .apply()
     }
 
