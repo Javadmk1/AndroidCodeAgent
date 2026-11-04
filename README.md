@@ -10,7 +10,10 @@ A native Android coding assistant foundation built with Kotlin and Jetpack Compo
 - OpenAI-compatible endpoints for providers such as DeepSeek, Qwen, Kimi and compatible gateways
 - Editable provider ID, model name and HTTPS base URL
 - API keys encrypted with AES-256-GCM; encryption key is held in Android Keystore
+- Model-driven OpenAI-compatible tool loop with a bounded number of rounds
 - Local workspace tools: list, read, search and approval-gated write
+- User approval dialog before every model-requested file write
+- Bounded local conversation history (last 80 messages)
 - Workspace path traversal protection and 1 MB per-file limit
 - GitHub Actions debug APK build
 
@@ -39,6 +42,9 @@ GitHub Actions builds a debug APK on pushes to `main` and manual workflow dispat
 - Local file tools are confined to the app-owned workspace directory.
 - File writes require an approval callback from the controller.
 - Arbitrary shell execution is deliberately not enabled.
-- The current chat screen sends normal chat requests. The model-driven tool-call loop, user-selected external project folders, build worker, APK signing/release flow, conversation database, and automated repair loop are not implemented yet.
+- Model-driven tool calling currently uses OpenAI-compatible Chat Completions providers; Anthropic is currently chat-only.
+- Workspace is app-private. User-selected external project folders and SAF import/export are not implemented yet.
+- On-device Gradle/Android SDK build worker, APK signing/release flow, and automated repair loop are not implemented yet.
+- Conversation history uses bounded app-private SharedPreferences JSON, not Room.
 
 Do not commit API keys, signing keys, or local machine configuration.
