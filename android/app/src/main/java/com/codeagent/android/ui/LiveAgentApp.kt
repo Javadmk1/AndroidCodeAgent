@@ -235,7 +235,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             )
         },
         bottomBar = {
-            Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 4.dp) {
+            if (selectedTab == MainTab.CHAT) Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 4.dp) {
                 Column(
                     Modifier.fillMaxWidth().imePadding().padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
