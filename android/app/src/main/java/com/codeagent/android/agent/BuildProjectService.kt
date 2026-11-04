@@ -83,7 +83,7 @@ class BuildProjectService(
                 if (file.isDirectory) return@forEach
                 require(file.isFile && !Files.isSymbolicLink(file.toPath())) { "فایل نامعتبر یا پیوند نمادین در پروژه: $relative" }
                 val lowerName = file.name.lowercase()
-                require(lowerName != "key.properties" && lowerName != "google-services.json" &&
+                require(lowerName != "key.properties" &&
                     !lowerName.endsWith(".jks") && !lowerName.endsWith(".keystore") &&
                     !lowerName.endsWith(".p12") && !lowerName.endsWith(".pfx") &&
                     !lowerName.endsWith(".pem") && lowerName != ".env" &&
