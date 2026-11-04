@@ -19,7 +19,7 @@ class AgentRuntime(
         config: ProviderConfig,
         apiKey: String,
         conversation: List<Pair<String, String>>,
-        approveWrite: suspend (String) -> Boolean
+        approveWrite: suspend (String, String) -> Boolean
     ): Result = withContext(Dispatchers.IO) {
         val anthropic = config.provider == "anthropic"
         val messages = JSONArray()
