@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -67,6 +68,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var prompt by remember { mutableStateOf("") }
     var settings by remember { mutableStateOf(false) }
     var showWorkspace by remember { mutableStateOf(false) }
+    var showHtmlPreview by remember { mutableStateOf(false) }
     var confirmClearHistory by remember { mutableStateOf(false) }
     var confirmDeleteKey by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -89,6 +91,10 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             addAll(historyStore.load().map { LiveLine(it.role, it.content) })
             if (isEmpty()) add(LiveLine("assistant", "سلام. درخواستت را بنویس؛ ابزارهای پروژه در فضای داخلی برنامه اجرا می‌شوند."))
         }
+    }
+    val htmlPreview = lines.lastOrNull { it.role == "assistant" }?.text?.let { message ->
+        Regex("""(?is)```(?:html)?\\s*(.*?)```""").find(message)?.groupValues?.get(1)?.trim()
+            ?: message.takeIf { it.contains("<html", true) || it.contains("<!doctype html", true) }
     }
     fun persistHistory() {
         historyStore.save(lines.map { ChatMessage(it.role, it.text) })
@@ -129,6 +135,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                 actions = {
                     IconButton(onClick = { importLauncher.launch(null) }, enabled = !transferBusy) { Icon(Icons.Default.FolderOpen, "وارد کردن پوشه پروژه") }
                     IconButton(onClick = { showWorkspace = true }) { Icon(Icons.Default.Folder, "مرور و ویرایش فایل‌های پروژه") }
+                    IconButton(onClick = { showHtmlPreview = true }, enabled = !htmlPreview.isNullOrBlank()) { Icon(Icons.Default.Code, "پیش‌نمایش HTML") }
                     IconButton(onClick = { confirmClearHistory = true }, enabled = !busy) { Icon(Icons.Default.Delete, "پاک کردن تاریخچه گفتگو") }
                     IconButton(onClick = { exportLauncher.launch("android-code-agent-project.zip") }, enabled = !transferBusy) { Icon(Icons.Default.Archive, "خروجی ZIP پروژه") }
                     IconButton(onClick = { provider=config.provider; model=config.model; endpoint=config.baseUrl; apiKey=""; settings=true }) { Icon(Icons.Default.Settings, "تنظیمات") }
@@ -208,10 +215,16 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         Column(Modifier.fillMaxSize().padding(padding)) {
             Text(status, Modifier.fillMaxWidth().padding(horizontal=14.dp, vertical=8.dp), style=MaterialTheme.typography.bodySmall)
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding=PaddingValues(12.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                items(lines) { line ->
+                itemsIndexed(lines) { index, line ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement=if(line.role=="user") Arrangement.End else Arrangement.Start) {
                         Surface(color=if(line.role=="user") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, shape=RoundedCornerShape(16.dp), modifier=Modifier.widthIn(max=340.dp)) {
                             Text(if(line.text.isBlank() && busy) "در حال دریافت پاسخ..." else line.text, Modifier.padding(12.dp))
+                        }
+                        MessageActions(text = line.text, editable = line.role == "user") {
+                            prompt = line.text
+                            lines.subList(index, lines.size).clear()
+                            persistHistory()
+                            status = "پیام برای ویرایش به کادر نوشتن منتقل شد."
                         }
                     }
                 }
@@ -220,6 +233,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     }
 
     if (showWorkspace) WorkspaceBrowser(workspaceDirectory) { showWorkspace = false }
+    if (showHtmlPreview && !htmlPreview.isNullOrBlank()) HtmlPreviewDialog(htmlPreview, onDismiss = { showHtmlPreview = false })
 
     if (confirmClearHistory) {
         AlertDialog(
