@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -48,6 +49,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var apiKey by remember { mutableStateOf("") }
     var prompt by remember { mutableStateOf("") }
     var settings by remember { mutableStateOf(false) }
+    var showWorkspace by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var transferBusy by remember { mutableStateOf(false) }
     var activeJob by remember { mutableStateOf<Job?>(null) }
@@ -107,6 +109,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                 title = { Column { Text("Android Code Agent"); Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall) } },
                 actions = {
                     IconButton(onClick = { importLauncher.launch(null) }, enabled = !transferBusy) { Icon(Icons.Default.FolderOpen, "وارد کردن پوشه پروژه") }
+                    IconButton(onClick = { showWorkspace = true }) { Icon(Icons.Default.Folder, "مرور و ویرایش فایل‌های پروژه") }
                     IconButton(onClick = { exportLauncher.launch("android-code-agent-project.zip") }, enabled = !transferBusy) { Icon(Icons.Default.Archive, "خروجی ZIP پروژه") }
                     IconButton(onClick = { provider=config.provider; model=config.model; endpoint=config.baseUrl; apiKey=""; settings=true }) { Icon(Icons.Default.Settings, "تنظیمات") }
                 }
@@ -187,6 +190,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             }
         }
     }
+
+    if (showWorkspace) WorkspaceBrowser(workspaceDirectory) { showWorkspace = false }
 
     if (approvalPath != null) {
         AlertDialog(
