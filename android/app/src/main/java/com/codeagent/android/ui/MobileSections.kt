@@ -16,46 +16,106 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.codeagent.android.llm.SavedConversation
+import com.codeagent.android.agent.ProjectRecord
 import java.io.File
 
 @Composable
-fun ProjectHomeScreen(workspaceDirectory: File, onImport: () -> Unit, onBrowse: () -> Unit, onBuild: () -> Unit, onExport: () -> Unit) {
+fun ProjectHomeScreen(
+    workspaceDirectory: File,
+    projects: List<ProjectRecord>,
+    activeProjectId: String,
+    onSelectProject: (ProjectRecord) -> Unit,
+    onCreateProject: (String) -> Unit,
+    onRenameProject: (ProjectRecord, String) -> Unit,
+    onDeleteProject: (ProjectRecord) -> Unit,
+    onImport: () -> Unit,
+    onBrowse: () -> Unit,
+    onBuild: () -> Unit,
+    onExport: () -> Unit
+) {
     val files = workspaceDirectory.walkTopDown().filter { it.isFile }
         .filter { file -> file.toPath().none { it.toString() in setOf(".git", ".gradle", "build", ".idea") } }
         .take(100).toList()
+    var createDialog by remember { mutableStateOf(false) }
+    var createName by remember { mutableStateOf("") }
+    var renameTarget by remember { mutableStateOf<ProjectRecord?>(null) }
+    var renameName by remember { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<ProjectRecord?>(null) }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("پروژه‌های من", style = MaterialTheme.typography.headlineSmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("پروژه‌های من", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+            Button(onClick = { createName = ""; createDialog = true }) { Icon(Icons.Default.Add, null); Text("پروژه جدید") }
+        }
         Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Workspace فعلی", style = MaterialTheme.typography.titleMedium)
-                        Text(workspaceDirectory.name, style = MaterialTheme.typography.bodySmall)
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("پروژه فعال", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Text(projects.firstOrNull { it.id == activeProjectId }?.name ?: workspaceDirectory.name, style = MaterialTheme.typography.titleLarge)
+                Text("${files.size} فایل در فضای کاری فعلی", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Text("همه پروژه‌ها", style = MaterialTheme.typography.titleMedium)
+        LazyColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(projects, key = { it.id }) { project ->
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(
+                    containerColor = if (project.id == activeProjectId) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                )) {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(project.name, style = MaterialTheme.typography.titleMedium)
+                                Text(if (project.id == activeProjectId) "پروژه فعال" else "فضای کاری مستقل", style = MaterialTheme.typography.labelSmall)
+                            }
+                            if (project.id != activeProjectId) TextButton(onClick = { onSelectProject(project) }) { Text("باز کردن") }
+                        }
+                        if (project.id == activeProjectId) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = onImport, modifier = Modifier.weight(1f)) { Text("وارد کردن") }
+                                OutlinedButton(onClick = onBrowse, modifier = Modifier.weight(1f)) { Text("فایل‌ها") }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = onBuild, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Build,null); Text("ساخت APK") }
+                                OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) { Icon(Icons.Default.Archive,null); Text("خروجی ZIP") }
+                            }
+                        }
+                        Row {
+                            TextButton(onClick = { renameTarget = project; renameName = project.name }) { Text("تغییر نام") }
+                            if (projects.size > 1) TextButton(onClick = { deleteTarget = project }) { Text("حذف", color = MaterialTheme.colorScheme.error) }
+                        }
                     }
-                    Text("${files.size} فایل", style = MaterialTheme.typography.labelMedium)
                 }
-                Text("این نسخه یک فضای کاری محلی فعال دارد. برای تعویض پروژه از وارد کردن پروژه استفاده کن.", style = MaterialTheme.typography.bodySmall)
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick=onImport, modifier=Modifier.weight(1f)) { Icon(Icons.Default.Add,null); Spacer(Modifier.width(6.dp)); Text("وارد کردن پروژه") }
-            OutlinedButton(onClick=onBrowse, modifier=Modifier.weight(1f)) { Icon(Icons.Default.FolderOpen,null); Spacer(Modifier.width(6.dp)); Text("فایل‌ها") }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick=onBuild, modifier=Modifier.weight(1f)) { Icon(Icons.Default.Build,null); Text("ساخت APK") }
-            OutlinedButton(onClick=onExport, modifier=Modifier.weight(1f)) { Icon(Icons.Default.Archive,null); Text("خروجی ZIP") }
-        }
-        Text("فایل‌های اخیر", style=MaterialTheme.typography.titleMedium)
-        LazyColumn(verticalArrangement=Arrangement.spacedBy(6.dp)) {
-            items(files.takeLast(30).asReversed(), key={it.absolutePath}) { file ->
+        Text("فایل‌های اخیر پروژه فعال", style = MaterialTheme.typography.titleMedium)
+        LazyColumn(Modifier.heightIn(max = 180.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(files.takeLast(20).asReversed(), key={it.absolutePath}) { file ->
                 ListItem(headlineContent={Text(file.relativeTo(workspaceDirectory).invariantSeparatorsPath, maxLines=1)}, supportingContent={Text("${file.length()} بایت")}, leadingContent={Icon(Icons.Default.FolderOpen,null)})
-                HorizontalDivider()
             }
-            if(files.isEmpty()) item { Text("پروژه‌ای وارد نشده است.", color=MaterialTheme.colorScheme.onSurfaceVariant) }
+            if(files.isEmpty()) item { Text("این پروژه هنوز فایلی ندارد.", color=MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
+    if (createDialog) AlertDialog(
+        onDismissRequest = { createDialog = false },
+        title = { Text("ساخت پروژه جدید") },
+        text = { OutlinedTextField(createName, { createName = it }, label = { Text("نام پروژه") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = { onCreateProject(createName); createDialog = false }, enabled = createName.isNotBlank()) { Text("ساخت") } },
+        dismissButton = { TextButton(onClick = { createDialog = false }) { Text("انصراف") } }
+    )
+    renameTarget?.let { project -> AlertDialog(
+        onDismissRequest = { renameTarget = null },
+        title = { Text("تغییر نام پروژه") },
+        text = { OutlinedTextField(renameName, { renameName = it }, label = { Text("نام جدید") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = { onRenameProject(project, renameName); renameTarget = null }, enabled = renameName.isNotBlank()) { Text("ذخیره") } },
+        dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("انصراف") } }
+    ) }
+    deleteTarget?.let { project -> AlertDialog(
+        onDismissRequest = { deleteTarget = null },
+        title = { Text("حذف پروژه؟") },
+        text = { Text("تمام فایل‌های پروژه «${project.name}» حذف می‌شوند. این کار قابل بازگشت نیست.") },
+        confirmButton = { TextButton(onClick = { onDeleteProject(project); deleteTarget = null }) { Text("حذف", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("انصراف") } }
+    ) }
 }
 
 @Composable
