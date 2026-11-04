@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -70,6 +71,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var settings by remember { mutableStateOf(false) }
     var showWorkspace by remember { mutableStateOf(false) }
     var showHtmlPreview by remember { mutableStateOf(false) }
+    var showBuildManager by remember { mutableStateOf(false) }
     var confirmClearHistory by remember { mutableStateOf(false) }
     var confirmDeleteKey by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -137,6 +139,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                     IconButton(onClick = { importLauncher.launch(null) }, enabled = !transferBusy) { Icon(Icons.Default.FolderOpen, "وارد کردن پوشه پروژه") }
                     IconButton(onClick = { showWorkspace = true }) { Icon(Icons.Default.Folder, "مرور و ویرایش فایل‌های پروژه") }
                     IconButton(onClick = { showHtmlPreview = true }, enabled = !htmlPreview.isNullOrBlank()) { Icon(Icons.Default.Code, "پیش‌نمایش HTML") }
+                    IconButton(onClick = { showBuildManager = true }) { Icon(Icons.Default.Build, "مدیریت ساخت APK") }
                     IconButton(onClick = { confirmClearHistory = true }, enabled = !busy) { Icon(Icons.Default.Delete, "پاک کردن تاریخچه گفتگو") }
                     IconButton(onClick = { exportLauncher.launch("android-code-agent-project.zip") }, enabled = !transferBusy) { Icon(Icons.Default.Archive, "خروجی ZIP پروژه") }
                     IconButton(onClick = { provider=config.provider; model=config.model; endpoint=config.baseUrl; apiKey=""; settings=true }) { Icon(Icons.Default.Settings, "تنظیمات") }
@@ -235,6 +238,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
 
     if (showWorkspace) WorkspaceBrowser(workspaceDirectory) { showWorkspace = false }
     if (showHtmlPreview && !htmlPreview.isNullOrBlank()) HtmlPreviewDialog(htmlPreview, onDismiss = { showHtmlPreview = false })
+    if (showBuildManager) BuildManagerDialog(onDismiss = { showBuildManager = false })
 
     if (confirmClearHistory) {
         AlertDialog(
