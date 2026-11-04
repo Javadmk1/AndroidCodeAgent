@@ -22,7 +22,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
-fun BuildManagerDialog(keys: SecureKeyStore, onDismiss: () -> Unit) {
+fun BuildManagerDialog(\n    keys: SecureKeyStore,\n    onDismiss: () -> Unit,\n    onBuildStatus: (String) -> Unit = {},\n    onBuildLog: (String) -> Unit = {},\n    onBuildOutput: (String) -> Unit = {}\n) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val client = remember(context) { CloudBuildClient(context) }
@@ -40,6 +40,12 @@ fun BuildManagerDialog(keys: SecureKeyStore, onDismiss: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("سرویس ابری هنوز پیکربندی نشده است.") }
     var buildLog by remember { mutableStateOf("") }
+
+    LaunchedEffect(status) { onBuildStatus(status) }
+    LaunchedEffect(buildLog) { onBuildLog(buildLog) }
+    LaunchedEffect(artifactFile) {
+        artifactFile?.let { file -> onBuildOutput("خروجی دریافت شد: ${file.name} · ${file.length()} بایت (ZIP شامل APKها)") }
+    }
 
     val zipPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
