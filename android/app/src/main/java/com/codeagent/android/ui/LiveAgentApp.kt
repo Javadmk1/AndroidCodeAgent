@@ -67,6 +67,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var model by remember { mutableStateOf(config.model) }
     var endpoint by remember { mutableStateOf(config.baseUrl) }
     var apiKey by remember { mutableStateOf("") }
+    var profiles by remember { mutableStateOf(configs.loadProfiles()) }
+    var profilesExpanded by remember { mutableStateOf(false) }
     var prompt by remember { mutableStateOf("") }
     var settings by remember { mutableStateOf(false) }
     var showWorkspace by remember { mutableStateOf(false) }
@@ -286,6 +288,28 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             title={ Text("تنظیمات مدل") },
             text={
                 Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                    Text("مدیریت پروفایل‌های مدل و API", style=MaterialTheme.typography.titleSmall)
+                    Box {
+                        TextButton(onClick = { profilesExpanded = true }) { Text("انتخاب پروفایل ذخیره‌شده (${profiles.size})") }
+                        DropdownMenu(expanded = profilesExpanded, onDismissRequest = { profilesExpanded = false }) {
+                            profiles.forEach { saved ->
+                                DropdownMenuItem(text = { Text("${saved.provider} · ${saved.model}") }, onClick = {
+                                    provider = saved.provider
+                                    model = saved.model
+                                    endpoint = saved.baseUrl
+                                    apiKey = ""
+                                    profilesExpanded = false
+                                })
+                            }
+                        }
+                    }
+                    TextButton(onClick = {
+                        provider = "custom_${profiles.size + 1}"
+                        model = ""
+                        endpoint = config.baseUrl
+                        apiKey = ""
+                    }) { Text("افزودن پروفایل جدید") }
+                    Text("شناسه هر پروفایل باید یکتا باشد؛ کلید API آن جداگانه ذخیره می‌شود.", style=MaterialTheme.typography.bodySmall)
                     Text("provider: openai / anthropic / compatible", style=MaterialTheme.typography.labelSmall)
                     OutlinedTextField(provider,{provider=it.trim().lowercase()},label={Text("Provider ID")},singleLine=true)
                     OutlinedTextField(model,{model=it},label={Text("Model")},singleLine=true)
@@ -310,6 +334,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                             "کلید API ذخیره شد اما هنگام بررسی دوباره خوانده نشد."
                         }
                         config=next
+                        profiles=configs.loadProfiles()
                         apiKey=""
                         status="تنظیمات و کلید API با موفقیت ذخیره و بررسی شد."
                         settings=false
