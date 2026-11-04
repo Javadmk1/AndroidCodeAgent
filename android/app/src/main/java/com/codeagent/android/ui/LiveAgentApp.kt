@@ -226,78 +226,125 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             )
         },
         bottomBar = {
-            Row(Modifier.fillMaxWidth().imePadding().padding(10.dp), verticalAlignment=Alignment.CenterVertically) {
-                OutlinedTextField(prompt, { prompt=it }, Modifier.weight(1f), placeholder={ Text("درخواست برنامه‌نویسی...") }, maxLines=4)
-                Spacer(Modifier.width(8.dp))
-                FilledIconButton(onClick={
-                    if (busy) {
-                        activeJob?.cancel()
-                        status = "درخواست لغو شد."
-                    } else {
-                    val question=prompt.trim()
-                    if(question.isNotEmpty()) {
-                        val secret=keys.read(config.provider)
-                        if(secret.isNullOrBlank()) { status="کلید API ثبت نشده است."; settings=true }
-                        else {
-                            prompt=""
-                            lines.add(LiveLine("user",question))
-                            lines.add(LiveLine("assistant",""))
-                            persistHistory()
-                            busy=true
-                            status="در حال پردازش درخواست..."
-                            val history = lines.dropLast(1).map { ChatMessage(it.role, it.text) }.toMutableList()
-                            val userIndex = history.indexOfLast { it.role == "user" }
-                            if (userIndex >= 0 && pendingImageData != null && pendingImageMime != null) {
-                                history[userIndex] = ChatMessage("user", question + "\n[[IMAGE:" + pendingImageMime + ":" + pendingImageData + "]]")
-                            }
-                            pendingImageData = null
-                            pendingImageMime = null
-                            pendingAttachmentName = null
-                            activeJob = scope.launch {
-                                try {
-                                    val result = runtime.run(
-                                        config = config,
-                                        apiKey = secret,
-                                        conversation = listOf("system" to AGENT_SYSTEM_PROMPT.trimIndent()) + history.map { it.role to it.content },
-                                        onText = { chunk ->
-                                            withContext(Dispatchers.Main.immediate) {
-                                                if (lines.isNotEmpty()) {
-                                                    val current = lines.last()
-                                                    lines[lines.lastIndex] = LiveLine("assistant", current.text + chunk)
-                                                }
-                                            }
-                                        },
-                                        approveWrite = { path, content ->
-                                            val gate = CompletableDeferred<Boolean>()
-                                            approvalPath = path
-                                            approvalPreview = content.take(800)
-                                            approvalDecision = gate
-                                            try { gate.await() } finally {
-                                                approvalPath = null
-                                                approvalPreview = ""
-                                                approvalDecision = null
-                                            }
-                                        }
-                                    )
-                                    val toolSummary = if (result.toolLog.isEmpty()) "" else
-                                        "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
-                                    lines[lines.lastIndex]=LiveLine("assistant",result.answer + toolSummary)
-                                    persistHistory()
-                                    status="درخواست به پایان رسید."
-                                } catch(e: CancellationException) {
-                                    persistHistory()
-                                    status = "درخواست لغو شد."
-                                } catch(e:Exception) {
-                                    lines[lines.lastIndex]=LiveLine("assistant","خطا: ${e.message ?: "نامشخص"}")
-                                    persistHistory()
-                                    status="درخواست ناموفق بود؛ مدل، کلید، endpoint و پشتیبانی ابزارها را بررسی کن."
-                                } finally { busy=false; activeJob=null }
+            Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 4.dp) {
+                Column(
+                    Modifier.fillMaxWidth().imePadding().padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = if (busy) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (busy) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)
+                                else Icon(Icons.Default.Folder, null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (busy) "ایجنت در حال کار است" else "Workspace · \${workspaceDirectory.name}", style = MaterialTheme.typography.labelSmall)
                             }
                         }
+                        Spacer(Modifier.weight(1f))
+                        Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AssistChip(onClick = { showWorkspace = true }, label = { Text("فایل‌ها") }, leadingIcon = { Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(16.dp)) })
+                        AssistChip(onClick = { showBuildManager = true }, label = { Text("ساخت APK") }, leadingIcon = { Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp)) })
+                        AssistChip(onClick = { showConversationList = true }, label = { Text("گفتگوها") }, leadingIcon = { Icon(Icons.Default.Forum, null, modifier = Modifier.size(16.dp)) })
                     }
-                }, enabled=(prompt.isNotBlank() && !busy) || busy) {
-                    if(busy) Icon(Icons.Default.Close,"لغو درخواست") else Icon(Icons.Default.Send,"ارسال")
+                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        IconButton(onClick = { attachmentLauncher.launch(arrayOf("*/*")) }, enabled = !busy) {
+                            Icon(Icons.Default.AttachFile, "افزودن فایل")
+                        }
+                        OutlinedTextField(
+                            value = prompt,
+                            onValueChange = { prompt = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("درخواست برنامه‌نویسی...") },
+                            maxLines = 5,
+                            shape = RoundedCornerShape(22.dp)
+                        )
+                        FilledIconButton(
+                            onClick = {
+                                if (busy) {
+                                    activeJob?.cancel()
+                                    status = "درخواست لغو شد."
+                                } else {
+                                    val question = prompt.trim()
+                                    if (question.isNotEmpty()) {
+                                        val secret = keys.read(config.provider)
+                                        if (secret.isNullOrBlank()) {
+                                            status = "کلید API ثبت نشده است."
+                                            settings = true
+                                        } else {
+                                            prompt = ""
+                                            lines.add(LiveLine("user", question))
+                                            lines.add(LiveLine("assistant", ""))
+                                            persistHistory()
+                                            busy = true
+                                            status = "در حال پردازش درخواست..."
+                                            val history = lines.dropLast(1).map { ChatMessage(it.role, it.text) }.toMutableList()
+                                            val userIndex = history.indexOfLast { it.role == "user" }
+                                            if (userIndex >= 0 && pendingImageData != null && pendingImageMime != null) {
+                                                history[userIndex] = ChatMessage("user", question + "\n[[IMAGE:" + pendingImageMime + ":" + pendingImageData + "]]")
+                                            }
+                                            pendingImageData = null
+                                            pendingImageMime = null
+                                            pendingAttachmentName = null
+                                            activeJob = scope.launch {
+                                                try {
+                                                    val result = runtime.run(
+                                                        config = config,
+                                                        apiKey = secret,
+                                                        conversation = listOf("system" to AGENT_SYSTEM_PROMPT.trimIndent()) + history.map { it.role to it.content },
+                                                        onText = { chunk ->
+                                                            withContext(Dispatchers.Main.immediate) {
+                                                                if (lines.isNotEmpty()) {
+                                                                    val current = lines.last()
+                                                                    lines[lines.lastIndex] = LiveLine("assistant", current.text + chunk)
+                                                                }
+                                                            }
+                                                        },
+                                                        approveWrite = { path, content ->
+                                                            val gate = CompletableDeferred<Boolean>()
+                                                            approvalPath = path
+                                                            approvalPreview = content.take(800)
+                                                            approvalDecision = gate
+                                                            try { gate.await() } finally {
+                                                                approvalPath = null
+                                                                approvalPreview = ""
+                                                                approvalDecision = null
+                                                            }
+                                                        }
+                                                    )
+                                                    val toolSummary = if (result.toolLog.isEmpty()) "" else "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
+                                                    lines[lines.lastIndex] = LiveLine("assistant", result.answer + toolSummary)
+                                                    persistHistory()
+                                                    status = "درخواست به پایان رسید."
+                                                } catch (e: CancellationException) {
+                                                    persistHistory()
+                                                    status = "درخواست لغو شد."
+                                                } catch (e: Exception) {
+                                                    lines[lines.lastIndex] = LiveLine("assistant", "خطا: \${e.message ?: "نامشخص"}")
+                                                    persistHistory()
+                                                    status = "درخواست ناموفق بود؛ مدل، کلید، endpoint و پشتیبانی ابزارها را بررسی کن."
+                                                } finally {
+                                                    busy = false
+                                                    activeJob = null
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = (prompt.isNotBlank() && !busy) || busy
+                        ) {
+                            if (busy) Icon(Icons.Default.Close, "لغو درخواست")
+                            else Icon(Icons.Default.Send, "ارسال")
+                        }
+                    }
+                    if (pendingAttachmentName != null) {
+                        Text("پیوست آماده: $pendingAttachmentName", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                    }
                 }
             }
         }
