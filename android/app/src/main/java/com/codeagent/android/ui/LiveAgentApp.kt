@@ -206,7 +206,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                     OutlinedTextField(model,{model=it},label={Text("Model")},singleLine=true)
                     OutlinedTextField(endpoint,{endpoint=it},label={Text("Base URL (HTTPS)")},singleLine=true)
                     OutlinedTextField(apiKey,{apiKey=it},label={Text("API Key")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password),singleLine=true)
-                    Text("کلید با Android Keystore رمزنگاری می‌شود. ابزارهای عامل فعلاً با APIهای سازگار با OpenAI کار می‌کنند؛ Anthropic در حالت چت عادی است.", style=MaterialTheme.typography.bodySmall)
+                    Text("کلید با Android Keystore رمزنگاری می‌شود. ابزارهای عامل از APIهای سازگار با OpenAI و Anthropic Messages پشتیبانی می‌کنند.", style=MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton={
