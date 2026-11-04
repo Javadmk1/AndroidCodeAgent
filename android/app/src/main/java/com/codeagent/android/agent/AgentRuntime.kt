@@ -265,7 +265,10 @@ class AgentRuntime(
                         val raw = partialInputs.remove(index)?.toString()
                         if (raw != null) {
                             val block = blocks[index] ?: JSONObject()
-                            block.put("input", runCatching { JSONObject(raw) }.getOrElse { JSONObject() })
+                            val parsedInput = runCatching { JSONObject(raw) }.getOrElse {
+                                throw IllegalStateException("Invalid streamed Anthropic tool input for ${block.optString("name")}.")
+                            }
+                            block.put("input", parsedInput)
                             blocks[index] = block
                         }
                     }
