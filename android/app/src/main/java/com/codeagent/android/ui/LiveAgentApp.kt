@@ -1,6 +1,5 @@
 package com.codeagent.android.ui
 
-import android.content.Context
 import com.codeagent.android.SecureKeyStore
 import com.codeagent.android.agent.AgentRuntime
 import com.codeagent.android.agent.ToolRegistry
@@ -98,11 +97,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                             }
                                         )
                                         val toolSummary = if (result.toolLog.isEmpty()) "" else
-                                            "
-
-گزارش ابزارها:
-" + result.toolLog.joinToString("
-")
+                                            "\\n\\nگزارش ابزارها:\\n" + result.toolLog.joinToString("\\n")
                                         lines[lines.lastIndex]=LiveLine("assistant",result.answer + toolSummary)
                                     }
                                     status="درخواست به پایان رسید."
