@@ -10,7 +10,7 @@ class ToolRegistry(private val workspace: WorkspaceTools) {
     suspend fun execute(
         toolName: String,
         arguments: JSONObject,
-        approveWrite: suspend (path: String) -> Boolean
+        approveWrite: suspend (path: String, content: String) -> Boolean
     ): JSONObject {
         return when (toolName) {
             "list_files" -> {
@@ -33,7 +33,7 @@ class ToolRegistry(private val workspace: WorkspaceTools) {
             }
             "write_file" -> {
                 val path = arguments.getString("path")
-                if (!approveWrite(path)) {
+                if (!approveWrite(path, arguments.getString("content"))) {
                     JSONObject().put("ok", false).put("error", "User denied file write")
                 } else {
                     workspace.writeFile(path, arguments.getString("content"))
