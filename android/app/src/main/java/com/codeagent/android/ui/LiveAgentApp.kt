@@ -3,6 +3,7 @@ package com.codeagent.android.ui
 import com.codeagent.android.SecureKeyStore
 import com.codeagent.android.agent.AgentRuntime
 import com.codeagent.android.agent.ProjectTransfer
+import com.codeagent.android.agent.ProjectStore
 import com.codeagent.android.agent.ToolRegistry
 import com.codeagent.android.agent.WorkspaceTools
 import com.codeagent.android.llm.*
@@ -63,11 +64,11 @@ Start by inspecting the project structure and relevant source files before propo
 Use the tools when file inspection or editing is needed; do not merely describe edits that you can perform.
 Never overwrite a file without first reading it when it already exists.
 The write_file tool requires explicit user approval; explain the intended change briefly and let the approval dialog decide.
-Do not claim that you compiled, ran, tested, installed, or debugged a project: this app currently has no local Gradle build or shell-execution tool.
+Do not reveal hidden reasoning or private deliberation. Show concise user-facing progress updates and concrete results only. Builds run through the configured isolated Android SDK builder; never claim a build succeeded until the builder confirms it.
 Do not invent files, test results, build results, API responses, or repository state.
 Make focused changes, preserve unrelated code, and explain exactly which files changed and which verification remains.
 Do not request or expose API keys, passwords, signing keystores, or other secrets in chat or project files.
-If the task needs a build, explain that the current remote build workflow supports public GitHub repositories and that the user must start it from GitHub Actions.
+If the task needs a build, use the configured isolated project build service when available. Ask for confirmation before starting a build. If no builder is configured, explain the setup requirement clearly.
 """
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -116,9 +117,14 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var approvalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     val scope = rememberCoroutineScope()
     val client = remember { LlmClient() }
-    val workspaceDirectory = remember(context) { File(context.filesDir, "workspace") }
-    val transfer = remember(context) { ProjectTransfer(context, workspaceDirectory) }
-    val runtime = remember(context) {
+    val projectStore = remember(context) { ProjectStore(context) }
+    var projects by remember(projectStore) { mutableStateOf(projectStore.loadProjects()) }
+    var activeProjectId by remember(projectStore) { mutableStateOf(projectStore.activeProjectId()) }
+    val activeProject = projects.firstOrNull { it.id == activeProjectId }
+    val activeProjectName = activeProject?.name ?: "پروژه من"
+    val workspaceDirectory = remember(context, activeProjectId) { projectStore.directory(activeProjectId) }
+    val transfer = remember(context, activeProjectId) { ProjectTransfer(context, workspaceDirectory) }
+    val runtime = remember(workspaceDirectory) {
         AgentRuntime(ToolRegistry(WorkspaceTools(workspaceDirectory)))
     }
     val lines = remember(historyStore, activeConversationId) {
@@ -144,7 +150,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             try {
                 context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 val result = transfer.importTree(uri)
-                status = "پروژه با موفقیت جایگزین شد: ${result.files} فایل"
+                status = "پروژه «" + activeProjectName + "» به‌روزرسانی شد: ${result.files} فایل"
+                projects = projectStore.loadProjects()
                 Toast.makeText(context, status, Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 status = "خطای ورود پروژه: ${e.message ?: "نامشخص"}"
@@ -214,7 +221,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                 title = {
                     Column {
                         Text("Android Code Agent", style = MaterialTheme.typography.titleMedium)
-                        Text(activeConversationTitle + " · " + config.model, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                        Text(activeProjectName + " · " + activeConversationTitle + " · " + config.model, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
                     }
                 },
                 actions = {
@@ -249,7 +256,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                 if (busy) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)
                                 else Icon(Icons.Default.Folder, null, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (busy) "ایجنت در حال کار است" else "Workspace · " + workspaceDirectory.name, style = MaterialTheme.typography.labelSmall)
+                                Text(if (busy) "ایجنت در حال کار است" else "پروژه · " + activeProjectName, style = MaterialTheme.typography.labelSmall)
                             }
                         }
                         Spacer(Modifier.weight(1f))
@@ -408,7 +415,38 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                         }
                     }
                 }
-                MainTab.PROJECTS -> ProjectHomeScreen(workspaceDirectory, { importLauncher.launch(null) }, { showWorkspace=true }, { showBuildManager=true }, { exportLauncher.launch("android-code-agent-project.zip") })
+                MainTab.PROJECTS -> ProjectHomeScreen(
+                    workspaceDirectory = workspaceDirectory,
+                    projects = projects,
+                    activeProjectId = activeProjectId,
+                    onSelectProject = { project ->
+                        projectStore.activate(project.id)
+                        activeProjectId = project.id
+                        projects = projectStore.loadProjects()
+                        status = "پروژه فعال شد: " + project.name
+                    },
+                    onCreateProject = { name -> runCatching {
+                        val created = projectStore.create(name)
+                        activeProjectId = created.id
+                        projects = projectStore.loadProjects()
+                        status = "پروژه ساخته شد: " + created.name
+                    }.onFailure { status = "خطای ساخت پروژه: " + (it.message ?: "نامشخص") } },
+                    onRenameProject = { project, name -> runCatching {
+                        projectStore.rename(project.id, name)
+                        projects = projectStore.loadProjects()
+                        status = "نام پروژه ذخیره شد."
+                    }.onFailure { status = "خطای تغییر نام: " + (it.message ?: "نامشخص") } },
+                    onDeleteProject = { project -> runCatching {
+                        projectStore.delete(project.id)
+                        activeProjectId = projectStore.activeProjectId()
+                        projects = projectStore.loadProjects()
+                        status = "پروژه حذف شد."
+                    }.onFailure { status = "خطای حذف پروژه: " + (it.message ?: "نامشخص") } },
+                    onImport = { importLauncher.launch(null) },
+                    onBrowse = { showWorkspace = true },
+                    onBuild = { showBuildManager = true },
+                    onExport = { exportLauncher.launch("android-code-agent-project.zip") }
+                )
                 MainTab.HISTORY -> HistoryHomeScreen(
                     conversations=conversations, activeId=activeConversationId,
                     onNew={
