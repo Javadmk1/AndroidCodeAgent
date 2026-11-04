@@ -97,7 +97,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                             }
                                         )
                                         val toolSummary = if (result.toolLog.isEmpty()) "" else
-                                            "\\n\\nگزارش ابزارها:\\n" + result.toolLog.joinToString("\\n")
+                                            "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
                                         lines[lines.lastIndex]=LiveLine("assistant",result.answer + toolSummary)
                                     }
                                     status="درخواست به پایان رسید."
