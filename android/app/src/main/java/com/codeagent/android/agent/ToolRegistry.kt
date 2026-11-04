@@ -40,7 +40,9 @@ class ToolRegistry(
             }
             "build_project" -> {
                 val task = arguments.optString("task", "assembleDebug")
-                if (!approveBuild(task)) {
+                if (task !in ALLOWED_BUILD_TASKS) {
+                    JSONObject().put("ok", false).put("error", "Gradle task is not in the approved allowlist")
+                } else if (!approveBuild(task)) {
                     JSONObject().put("ok", false).put("error", "User denied build execution")
                 } else {
                     buildProject(task, onActivity)
@@ -60,4 +62,8 @@ class ToolRegistry(
     }
 
     fun toolNames(): List<String> = listOf("list_files", "read_file", "search_in_files", "write_file", "build_project")
+
+    private companion object {
+        val ALLOWED_BUILD_TASKS = setOf("tasks", "assembleDebug", "testDebugUnitTest", "lintDebug", "check", "clean")
+    }
 }
