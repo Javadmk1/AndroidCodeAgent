@@ -17,6 +17,7 @@ WORKER_IMAGE = os.environ.get("ANDROID_BUILDER_IMAGE", "android-code-agent-build
 MAX_UPLOAD = 100 * 1024 * 1024
 MAX_EXPANDED = 300 * 1024 * 1024
 MAX_FILES = 5000
+ALLOWED_GRADLE_TASKS = {"tasks", "assembleDebug", "testDebugUnitTest", "lintDebug", "check", "clean"}
 JOBS: dict[str, dict[str, Any]] = {}
 LOCK = asyncio.Semaphore(1)
 app = FastAPI(title="Android Code Agent Isolated Builder", version="1.0")
@@ -80,6 +81,12 @@ async def execute_job(job_id: str) -> None:
             source = Path(job["source"])
             project = Path(job["project"])
             work = Path(job["work"])
+            task = job["task"]
+            wrapper = project / "gradlew"
+            if wrapper.is_file():
+                gradle_command = ["bash", str(wrapper), "--no-daemon", "--console=plain", task]
+            else:
+                gradle_command = ["gradle", "--no-daemon", "--console=plain", task]
             command = [
                 "docker", "run", "--rm",
                 "--network=bridge",
@@ -87,34 +94,41 @@ async def execute_job(job_id: str) -> None:
                 "--security-opt=no-new-privileges", "--cap-drop=ALL",
                 "--tmpfs", "/tmp:rw,nosuid,nodev,size=1g",
                 "--tmpfs", "/root/.gradle:rw,nosuid,nodev,size=2g",
-                "--mount", f"type=bind,src={source},dst=/workspace",
-                "--mount", f"type=bind,src={work / 'outputs'},dst=/outputs",
+                "--mount", "type=bind,src=" + str(source) + ",dst=/workspace",
+                "--mount", "type=bind,src=" + str(work / "outputs") + ",dst=/outputs",
                 "--workdir", "/workspace/" + project.relative_to(source).as_posix(),
                 WORKER_IMAGE,
-                "bash", "-lc",
-                "if [ -x ./gradlew ]; then ./gradlew --no-daemon assembleDebug; else gradle --no-daemon assembleDebug; fi"
+                *gradle_command
             ]
             process = await asyncio.create_subprocess_exec(
                 *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
             )
+            async def stream_output() -> None:
+                assert process.stdout is not None
+                while True:
+                    line = await process.stdout.readline()
+                    if not line:
+                        break
+                    current = job.get("log", "")
+                    job["log"] = (current + line.decode("utf-8", errors="replace"))[-200000:]
+                    job["updated_at"] = int(time.time())
             try:
-                output, _ = await asyncio.wait_for(process.communicate(), timeout=2100)
+                await asyncio.wait_for(asyncio.gather(process.wait(), stream_output()), timeout=2100)
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                raise RuntimeError("Build exceeded the 35 minute time limit")
-            job["log"] = output.decode("utf-8", errors="replace")[-200000:]
+                raise RuntimeError("Build command exceeded the 35 minute time limit")
             if process.returncode != 0:
-                raise RuntimeError(f"Gradle exited with code {process.returncode}")
-            apks = list(source.glob("**/build/outputs/apk/*/*.apk"))
-            apks = [p for p in apks if "androidTest" not in p.parts]
-            if not apks:
-                raise RuntimeError("Build finished but no APK was produced")
-            artifact = work / "outputs" / "android-code-agent-apks.zip"
-            with zipfile.ZipFile(artifact, "w", zipfile.ZIP_DEFLATED) as zf:
-                for apk in apks:
-                    zf.write(apk, apk.relative_to(source).as_posix())
-            job["artifact"] = str(artifact)
+                raise RuntimeError(f"Gradle task {task} exited with code {process.returncode}")
+            if task == "assembleDebug":
+                apks = [p for p in source.glob("**/build/outputs/apk/**/*.apk") if "androidTest" not in p.parts]
+                if not apks:
+                    raise RuntimeError("Gradle finished but no APK was produced")
+                artifact = work / "outputs" / "android-code-agent-apks.zip"
+                with zipfile.ZipFile(artifact, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for apk in apks:
+                        zf.write(apk, apk.relative_to(source).as_posix())
+                job["artifact"] = str(artifact)
             job["status"] = "completed"
         except Exception as exc:
             job["status"] = "failed"
@@ -125,15 +139,41 @@ async def execute_job(job_id: str) -> None:
             job["updated_at"] = int(time.time())
 
 
+@app.get("/v1/environment")
+async def get_environment(authorization: str | None = Header(default=None)):
+    require_auth(authorization)
+    command = [
+        "docker", "run", "--rm", "--network=none", "--cpus=1", "--memory=1g",
+        "--pids-limit=64", "--security-opt=no-new-privileges", "--cap-drop=ALL",
+        WORKER_IMAGE, "bash", "-lc",
+        "java -version 2>&1; gradle --version | head -n 6; sdkmanager --list_installed 2>/dev/null | grep -E 'platforms;|build-tools;' | tail -n 20"
+    ]
+    try:
+        process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        output, _ = await asyncio.wait_for(process.communicate(), timeout=90)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise HTTPException(504, "Android SDK environment check timed out")
+    except Exception as exc:
+        raise HTTPException(503, f"Android SDK environment unavailable: {exc}")
+    if process.returncode != 0:
+        raise HTTPException(503, output.decode("utf-8", errors="replace")[-4000:])
+    return {"status": "ready", "sdk_root": "/opt/android-sdk", "output": output.decode("utf-8", errors="replace")[-8000:]}
+
+
 @app.post("/v1/builds")
 async def create_build(
     file: UploadFile = File(...),
     project_dir: str = Form("."),
+    gradle_task: str = Form("assembleDebug"),
     authorization: str | None = Header(default=None),
 ):
     require_auth(authorization)
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(400, "Upload a ZIP project archive")
+    if gradle_task not in ALLOWED_GRADLE_TASKS:
+        raise HTTPException(400, "Gradle task is not in the allowed command list")
     job_id = uuid.uuid4().hex
     work = Path(tempfile.mkdtemp(prefix="aca-build-"))
     source = work / "source"
@@ -164,7 +204,7 @@ async def create_build(
     archive.unlink(missing_ok=True)
     JOBS[job_id] = {
         "status": "queued", "created_at": int(time.time()), "updated_at": int(time.time()),
-        "work": str(work), "source": str(source), "project": str(project), "log": ""
+        "work": str(work), "source": str(source), "project": str(project), "log": "", "task": gradle_task
     }
     asyncio.create_task(execute_job(job_id))
     return {"build_id": job_id, "status": "queued"}
@@ -177,7 +217,7 @@ async def get_build(job_id: str, authorization: str | None = Header(default=None
     if not job:
         raise HTTPException(404, "Build not found")
     return {
-        "build_id": job_id, "status": job["status"], "error": job.get("error"),
+        "build_id": job_id, "status": job["status"], "task": job.get("task"), "error": job.get("error"),
         "log": job.get("log", "")[-20000:], "updated_at": job["updated_at"],
         "artifact_ready": bool(job.get("artifact"))
     }
