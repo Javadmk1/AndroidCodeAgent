@@ -95,8 +95,11 @@ class AgentRuntime(
                 .put("messages", messages).put("tools", tools)
                 .apply { if (system.isNotBlank()) put("system", system) }
         } else {
+            val openAiMessages = JSONArray()
+            if (system.isNotBlank()) openAiMessages.put(JSONObject().put("role", "system").put("content", system))
+            for (index in 0 until messages.length()) openAiMessages.put(messages.get(index))
             JSONObject().put("model", config.model).put("stream", false)
-                .put("messages", messages).put("tools", openAiTools()).put("tool_choice", "auto")
+                .put("messages", openAiMessages).put("tools", openAiTools()).put("tool_choice", "auto")
         }
         val endpoint = config.baseUrl.trimEnd('/') + if (anthropic) "/messages" else "/chat/completions"
         val connection = URL(endpoint).openConnection() as HttpURLConnection
