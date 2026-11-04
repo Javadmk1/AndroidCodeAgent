@@ -42,4 +42,22 @@ class WorkspaceToolsTest {
             assertTrue(expected.message.orEmpty().contains("1 MB"))
         }
     }
+    @Test
+    fun rejectsSymlinkEscape() {
+        val workspaceDir = temporaryFolder.newFolder("workspace")
+        val outside = temporaryFolder.newFolder("outside")
+        java.io.File(outside, "secret.txt").writeText("private")
+        java.nio.file.Files.createSymbolicLink(
+            java.io.File(workspaceDir, "linked").toPath(),
+            outside.toPath()
+        )
+        val workspace = WorkspaceTools(workspaceDir)
+        try {
+            workspace.readFile("linked/secret.txt")
+            fail("Expected symlink traversal to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("Path escapes"))
+        }
+    }
+
 }
