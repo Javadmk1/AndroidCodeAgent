@@ -430,7 +430,11 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                     Text(if(busy) "● ایجنت مشغول است" else "● آماده", color=if(busy) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary, style=MaterialTheme.typography.labelMedium)
                                     agentEvents.takeLast(4).forEach { Text(it, style=MaterialTheme.typography.bodySmall, maxLines=1) }
                                 }
-                                "terminal" -> Text("ترمینال اجرایی هنوز فعال نیست. این بخش فعلاً وضعیت محیط را نشان می‌دهد و فرمانی اجرا نمی‌کند.", style=MaterialTheme.typography.bodySmall)
+                                "terminal" -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("ترمینال امن Gradle به محیط Android SDK متصل می‌شود. فقط دستورهای مجاز اجرا می‌شوند.", style = MaterialTheme.typography.bodySmall)
+                                    Text(buildStatus, style = MaterialTheme.typography.bodySmall)
+                                    Button(onClick = { showBuildManager = true }, modifier = Modifier.fillMaxWidth()) { Text("باز کردن ترمینال و Android SDK") }
+                                }
                                 "build" -> {
                                     Text(buildStatus, style=MaterialTheme.typography.bodySmall)
                                     if(buildLog.isNotBlank()) Text(buildLog.takeLast(900), style=MaterialTheme.typography.bodySmall, maxLines=5)
