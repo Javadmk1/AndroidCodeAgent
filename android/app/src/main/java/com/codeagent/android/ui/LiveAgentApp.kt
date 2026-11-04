@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 private data class LiveLine(val role: String, val text: String)
@@ -146,6 +148,14 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                         config = config,
                                         apiKey = secret,
                                         conversation = history.map { it.role to it.content },
+                                        onText = { chunk ->
+                                            withContext(Dispatchers.Main.immediate) {
+                                                if (lines.isNotEmpty()) {
+                                                    val current = lines.last()
+                                                    lines[lines.lastIndex] = LiveLine("assistant", current.text + chunk)
+                                                }
+                                            }
+                                        },
                                         approveWrite = { path, content ->
                                             val gate = CompletableDeferred<Boolean>()
                                             approvalPath = path
