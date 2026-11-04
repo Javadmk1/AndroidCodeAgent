@@ -144,10 +144,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         AlertDialog(
             onDismissRequest = { approvalDecision?.complete(false) },
             title = { Text("اجازهٔ تغییر فایل؟") },
-            text = { Text("مدل می‌خواهد این فایل را ایجاد یا جایگزین کند:
-$approvalPath
-
-فقط اگر مسیر و تغییر را می‌شناسی تأیید کن.") },
+            text = { Text("مدل می‌خواهد این فایل را ایجاد یا جایگزین کند:\\n$approvalPath\\n\\nفقط اگر مسیر و تغییر را می‌شناسی تأیید کن.") },
             confirmButton = { TextButton(onClick = { approvalDecision?.complete(true) }) { Text("تأیید نوشتن") } },
             dismissButton = { TextButton(onClick = { approvalDecision?.complete(false) }) { Text("رد") } }
         )
