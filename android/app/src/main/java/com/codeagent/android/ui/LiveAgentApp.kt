@@ -439,7 +439,10 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                     Text(buildStatus, style=MaterialTheme.typography.bodySmall)
                                     if(buildLog.isNotBlank()) Text(buildLog.takeLast(900), style=MaterialTheme.typography.bodySmall, maxLines=5)
                                 }
-                                "output" -> Text(buildOutput, style=MaterialTheme.typography.bodySmall)
+                                "output" -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(buildOutput, style = MaterialTheme.typography.bodySmall)
+                                    Button(onClick = { showBuildManager = true }, modifier = Modifier.fillMaxWidth()) { Text("مشاهده و ذخیره خروجی APK") }
+                                }
                             }
                         }
                     }
