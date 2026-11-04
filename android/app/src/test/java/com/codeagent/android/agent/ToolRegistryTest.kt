@@ -1,5 +1,6 @@
 package com.codeagent.android.agent
 
+import java.nio.file.Files
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,7 +11,7 @@ import kotlinx.coroutines.runBlocking
 class ToolRegistryTest {
     @Test
     fun buildRequiresApprovalAndRunsOnlyAfterApproval() = runBlocking {
-        val workspaceDir = createTempDir(prefix = "agent-workspace-")
+        val workspaceDir = Files.createTempDirectory("agent-workspace-").toFile()
         try {
             var executedTask: String? = null
             val registry = ToolRegistry(
