@@ -20,6 +20,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.zip.ZipFile
 
 @Composable
 fun BuildManagerDialog(
@@ -46,11 +47,21 @@ fun BuildManagerDialog(
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("سرویس ابری هنوز پیکربندی نشده است.") }
     var buildLog by remember { mutableStateOf("") }
+    var artifactSummary by remember { mutableStateOf("") }
 
     LaunchedEffect(status) { onBuildStatus(status) }
     LaunchedEffect(buildLog) { onBuildLog(buildLog) }
     LaunchedEffect(artifactFile) {
-        artifactFile?.let { file -> onBuildOutput("خروجی دریافت شد: ${file.name} · ${file.length()} بایت (ZIP شامل APKها)") }
+        artifactFile?.let { file ->
+            artifactSummary = runCatching {
+                ZipFile(file).use { zip ->
+                    val entries = zip.entries().asSequence().filter { !it.isDirectory && it.name.endsWith(".apk", true) }
+                        .map { "${it.name} · ${it.size} بایت" }.toList()
+                    if (entries.isEmpty()) "در ZIP فایل APK پیدا نشد." else entries.joinToString("\n")
+                }
+            }.getOrElse { "فهرست APKها قابل خواندن نیست: ${it.message ?: "خطای ZIP"}" }
+            onBuildOutput("خروجی: ${file.name} · ${file.length()} بایت\n" + artifactSummary)
+        }
     }
 
     val zipPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -158,8 +169,10 @@ fun BuildManagerDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(if (busy) "در حال ساخت..." else "شروع ساخت ابری") }
                 if (artifactFile != null) {
+                    Text("فایل‌های APK داخل خروجی:", style = MaterialTheme.typography.titleSmall)
+                    Text(artifactSummary, style = MaterialTheme.typography.bodySmall)
                     Button(onClick = { saveArtifact.launch("android-code-agent-apks.zip") }, modifier = Modifier.fillMaxWidth()) {
-                        Text("ذخیره APKهای ساخته‌شده")
+                        Text("ذخیره ZIP شامل APKها")
                     }
                 }
                 Text(status, style = MaterialTheme.typography.bodySmall)
