@@ -41,6 +41,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var settings by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("API هنوز پیکربندی نشده است.") }
+    val historyStore = remember(context) { ConversationStore(context) }
     var approvalPath by remember { mutableStateOf<String?>(null) }
     var approvalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     val scope = rememberCoroutineScope()
@@ -48,7 +49,15 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     val runtime = remember(context) {
         AgentRuntime(ToolRegistry(WorkspaceTools(File(context.filesDir, "workspace"))))
     }
-    val lines = remember { mutableStateListOf(LiveLine("assistant", "سلام. درخواستت را بنویس؛ ابزارهای پروژه در فضای داخلی برنامه اجرا می‌شوند.")) }
+    val lines = remember(historyStore) {
+        mutableStateListOf<LiveLine>().apply {
+            addAll(historyStore.load().map { LiveLine(it.role, it.content) })
+            if (isEmpty()) add(LiveLine("assistant", "سلام. درخواستت را بنویس؛ ابزارهای پروژه در فضای داخلی برنامه اجرا می‌شوند."))
+        }
+    }
+    fun persistHistory() {
+        historyStore.save(lines.map { ChatMessage(it.role, it.text) })
+    }
 
     Scaffold(
         topBar = {
@@ -70,6 +79,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                             prompt=""
                             lines.add(LiveLine("user",question))
                             lines.add(LiveLine("assistant",""))
+                            persistHistory()
                             busy=true
                             status="در حال پردازش درخواست..."
                             val history=lines.dropLast(1).map { ChatMessage(it.role,it.text) }
@@ -100,9 +110,11 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                             "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
                                         lines[lines.lastIndex]=LiveLine("assistant",result.answer + toolSummary)
                                     }
+                                    persistHistory()
                                     status="درخواست به پایان رسید."
                                 } catch(e:Exception) {
                                     lines[lines.lastIndex]=LiveLine("assistant","خطا: ${e.message ?: "نامشخص"}")
+                                    persistHistory()
                                     status="درخواست ناموفق بود؛ مدل، کلید، endpoint و پشتیبانی ابزارها را بررسی کن."
                                 } finally { busy=false }
                             }
