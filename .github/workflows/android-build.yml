@@ -1,17 +1,24 @@
 name: Android debug build
 on:
   push:
-    branches: [ main, ui/mobile-agent-workspace, feature/multi-project-sandbox-build ]
+    branches: [ main, ui/mobile-agent-workspace, feature/multi-project-sandbox-build, 'release/**' ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -27,6 +34,8 @@ jobs:
           gradle-version: '8.13'
       - name: Run unit tests
         run: gradle -p android --no-daemon testDebugUnitTest
+      - name: Run Android lint
+        run: gradle -p android --no-daemon lintDebug
       - name: Build debug APK
         run: gradle -p android --no-daemon assembleDebug
       - name: Verify debug APK and create checksum
@@ -38,6 +47,7 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
           sha256sum "$APK" > "$APK.sha256"
       - name: Build signed release APK when signing secrets exist
+        if: ${{ github.event_name != 'pull_request' }}
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -79,6 +89,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Upload signed release APK and checksum
+        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v4
         with:
           name: android-code-agent-release
