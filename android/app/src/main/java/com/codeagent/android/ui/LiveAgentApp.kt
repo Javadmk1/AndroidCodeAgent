@@ -24,7 +24,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert\nimport androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -81,7 +81,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var profiles by remember { mutableStateOf(configs.loadProfiles()) }
     var profilesExpanded by remember { mutableStateOf(false) }
     var prompt by remember { mutableStateOf("") }
-    var settings by remember { mutableStateOf(false) }
+    var settings by remember { mutableStateOf(false) }\n    var menuExpanded by remember { mutableStateOf(false) }
     var showWorkspace by remember { mutableStateOf(false) }
     var showHtmlPreview by remember { mutableStateOf(false) }
     var showBuildManager by remember { mutableStateOf(false) }
@@ -200,16 +200,26 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Column { Text("Android Code Agent"); Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall) } },
+                title = {
+                    Column {
+                        Text("Android Code Agent", style = MaterialTheme.typography.titleMedium)
+                        Text(activeConversationTitle + " · " + config.model, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                    }
+                },
                 actions = {
-                    IconButton(onClick = { showConversationList = true }, enabled = !busy) { Icon(Icons.Default.Forum, "فهرست گفتگوها") }
-                    IconButton(onClick = { importLauncher.launch(null) }, enabled = !transferBusy) { Icon(Icons.Default.FolderOpen, "وارد کردن پوشه پروژه") }
-                    IconButton(onClick = { showWorkspace = true }) { Icon(Icons.Default.Folder, "مرور و ویرایش فایل‌های پروژه") }
-                    IconButton(onClick = { showHtmlPreview = true }, enabled = !htmlPreview.isNullOrBlank()) { Icon(Icons.Default.Code, "پیش‌نمایش HTML") }
-                    IconButton(onClick = { showBuildManager = true }) { Icon(Icons.Default.Build, "مدیریت ساخت APK") }
-                    IconButton(onClick = { confirmClearHistory = true }, enabled = !busy) { Icon(Icons.Default.Delete, "پاک کردن تاریخچه گفتگو") }
-                    IconButton(onClick = { exportLauncher.launch("android-code-agent-project.zip") }, enabled = !transferBusy) { Icon(Icons.Default.Archive, "خروجی ZIP پروژه") }
-                    IconButton(onClick = { provider=config.provider; model=config.model; endpoint=config.baseUrl; apiKey=""; settings=true }) { Icon(Icons.Default.Settings, "تنظیمات") }
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "ابزارهای پروژه") }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(text = { Text("گفتگوها") }, leadingIcon = { Icon(Icons.Default.Forum, null) }, onClick = { menuExpanded = false; showConversationList = true })
+                            DropdownMenuItem(text = { Text("وارد کردن پروژه") }, leadingIcon = { Icon(Icons.Default.FolderOpen, null) }, onClick = { menuExpanded = false; importLauncher.launch(null) })
+                            DropdownMenuItem(text = { Text("فایل‌های پروژه") }, leadingIcon = { Icon(Icons.Default.Folder, null) }, onClick = { menuExpanded = false; showWorkspace = true })
+                            DropdownMenuItem(text = { Text("پیش‌نمایش HTML") }, leadingIcon = { Icon(Icons.Default.Code, null) }, enabled = !htmlPreview.isNullOrBlank(), onClick = { menuExpanded = false; showHtmlPreview = true })
+                            DropdownMenuItem(text = { Text("ساخت APK") }, leadingIcon = { Icon(Icons.Default.Build, null) }, onClick = { menuExpanded = false; showBuildManager = true })
+                            DropdownMenuItem(text = { Text("خروجی ZIP پروژه") }, leadingIcon = { Icon(Icons.Default.Archive, null) }, onClick = { menuExpanded = false; exportLauncher.launch("android-code-agent-project.zip") })
+                            DropdownMenuItem(text = { Text("پاک کردن گفتگو") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { menuExpanded = false; confirmClearHistory = true })
+                            DropdownMenuItem(text = { Text("تنظیمات") }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { menuExpanded = false; provider=config.provider; model=config.model; endpoint=config.baseUrl; apiKey=""; settings=true })
+                        }
+                    }
                 }
             )
         },
