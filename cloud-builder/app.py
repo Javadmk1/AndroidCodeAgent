@@ -87,7 +87,7 @@ async def execute_job(job_id: str) -> None:
                 "--security-opt=no-new-privileges", "--cap-drop=ALL",
                 "--tmpfs", "/tmp:rw,nosuid,nodev,size=1g",
                 "--tmpfs", "/root/.gradle:rw,nosuid,nodev,size=2g",
-                "--mount", f"type=bind,src={source},dst=/workspace,readonly",
+                "--mount", f"type=bind,src={source},dst=/workspace",
                 "--mount", f"type=bind,src={work / 'outputs'},dst=/outputs",
                 "--workdir", "/workspace/" + project.relative_to(source).as_posix(),
                 WORKER_IMAGE,
