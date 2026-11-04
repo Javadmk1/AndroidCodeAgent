@@ -10,9 +10,8 @@ import kotlinx.coroutines.runBlocking
 
 class ToolRegistryTest {
     private fun newWorkspaceDir(): File =
-        File.createTempFile("agent-workspace-", "").apply {
-            check(delete()) { "Could not prepare workspace temp directory" }
-            check(mkdir()) { "Could not create workspace temp directory" }
+        File(System.getProperty("java.io.tmpdir"), "agent-workspace-${System.nanoTime()}").apply {
+            check(mkdirs()) { "Could not create workspace temp directory: $absolutePath" }
         }
 
     @Test
