@@ -71,8 +71,12 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                 OutlinedTextField(prompt, { prompt=it }, Modifier.weight(1f), placeholder={ Text("درخواست برنامه‌نویسی...") }, maxLines=4)
                 Spacer(Modifier.width(8.dp))
                 FilledIconButton(onClick={
+                    if (busy) {
+                        activeJob?.cancel()
+                        status = "درخواست لغو شد."
+                    } else {
                     val question=prompt.trim()
-                    if(question.isNotEmpty() && !busy) {
+                    if(question.isNotEmpty()) {
                         val secret=keys.read(config.provider)
                         if(secret.isNullOrBlank()) { status="کلید API ثبت نشده است."; settings=true }
                         else {
@@ -83,7 +87,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                             busy=true
                             status="در حال پردازش درخواست..."
                             val history=lines.dropLast(1).map { ChatMessage(it.role,it.text) }
-                            scope.launch {
+                            activeJob = scope.launch {
                                 try {
                                     if (config.provider == "anthropic") {
                                         var response=""
@@ -112,16 +116,20 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                     }
                                     persistHistory()
                                     status="درخواست به پایان رسید."
+                                } catch(e: CancellationException) {
+                                    persistHistory()
+                                    status = "درخواست لغو شد."
                                 } catch(e:Exception) {
                                     lines[lines.lastIndex]=LiveLine("assistant","خطا: ${e.message ?: "نامشخص"}")
                                     persistHistory()
                                     status="درخواست ناموفق بود؛ مدل، کلید، endpoint و پشتیبانی ابزارها را بررسی کن."
-                                } finally { busy=false }
+                                } finally { busy=false; activeJob=null }
                             }
                         }
                     }
-                }, enabled=prompt.isNotBlank() && !busy) {
-                    if(busy) CircularProgressIndicator(Modifier.size(20.dp),strokeWidth=2.dp) else Icon(Icons.Default.Send,"ارسال")
+                    }
+                }, enabled=(prompt.isNotBlank() && !busy) || busy) {
+                    if(busy) Icon(Icons.Default.Close,"لغو درخواست") else Icon(Icons.Default.Send,"ارسال")
                 }
             }
         }
