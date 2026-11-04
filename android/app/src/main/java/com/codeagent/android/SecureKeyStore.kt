@@ -22,6 +22,7 @@ class SecureKeyStore(context: Context) {
         require(apiKey.isNotBlank()) { "API key cannot be empty" }
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        cipher.updateAAD(provider.toByteArray(Charsets.UTF_8))
         val encrypted = cipher.doFinal(apiKey.toByteArray(Charsets.UTF_8))
         val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
         val body = Base64.encodeToString(encrypted, Base64.NO_WRAP)
@@ -44,6 +45,7 @@ class SecureKeyStore(context: Context) {
                 getOrCreateKey(),
                 GCMParameterSpec(128, Base64.decode(ivText, Base64.NO_WRAP))
             )
+            cipher.updateAAD(provider.toByteArray(Charsets.UTF_8))
             String(cipher.doFinal(Base64.decode(bodyText, Base64.NO_WRAP)), Charsets.UTF_8)
         } catch (_: Exception) {
             null
