@@ -2,6 +2,7 @@ package com.codeagent.android.ui
 
 import com.codeagent.android.SecureKeyStore
 import com.codeagent.android.agent.AgentRuntime
+import com.codeagent.android.agent.ProjectTransfer
 import com.codeagent.android.agent.ToolRegistry
 import com.codeagent.android.agent.WorkspaceTools
 import com.codeagent.android.llm.*
@@ -13,11 +14,19 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -40,14 +49,18 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var prompt by remember { mutableStateOf("") }
     var settings by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var transferBusy by remember { mutableStateOf(false) }
+    var activeJob by remember { mutableStateOf<Job?>(null) }
     var status by remember { mutableStateOf("API هنوز پیکربندی نشده است.") }
     val historyStore = remember(context) { ConversationStore(context) }
     var approvalPath by remember { mutableStateOf<String?>(null) }
     var approvalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     val scope = rememberCoroutineScope()
     val client = remember { LlmClient() }
+    val workspaceDirectory = remember(context) { File(context.filesDir, "workspace") }
+    val transfer = remember(context) { ProjectTransfer(context, workspaceDirectory) }
     val runtime = remember(context) {
-        AgentRuntime(ToolRegistry(WorkspaceTools(File(context.filesDir, "workspace"))))
+        AgentRuntime(ToolRegistry(WorkspaceTools(workspaceDirectory)))
     }
     val lines = remember(historyStore) {
         mutableStateListOf<LiveLine>().apply {
@@ -59,11 +72,43 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         historyStore.save(lines.map { ChatMessage(it.role, it.text) })
     }
 
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) scope.launch {
+            transferBusy = true
+            status = "در حال وارد کردن پروژه..."
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val result = transfer.importTree(uri)
+                status = "ورود پروژه انجام شد: ${result.files} فایل"
+                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                status = "خطای ورود پروژه: ${e.message ?: "نامشخص"}"
+            } finally { transferBusy = false }
+        }
+    }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) scope.launch {
+            transferBusy = true
+            status = "در حال ساخت ZIP پروژه..."
+            try {
+                val result = transfer.exportZip(uri)
+                status = "خروجی پروژه ذخیره شد: ${result.files} فایل"
+                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                status = "خطای خروجی پروژه: ${e.message ?: "نامشخص"}"
+            } finally { transferBusy = false }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Column { Text("Android Code Agent"); Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall) } },
-                actions = { IconButton(onClick = { provider=config.provider; model=config.model; endpoint=config.baseUrl; apiKey=""; settings=true }) { Icon(Icons.Default.Settings, "تنظیمات") } }
+                actions = {
+                    IconButton(onClick = { importLauncher.launch(null) }, enabled = !transferBusy) { Icon(Icons.Default.FolderOpen, "وارد کردن پوشه پروژه") }
+                    IconButton(onClick = { exportLauncher.launch("android-code-agent-project.zip") }, enabled = !transferBusy) { Icon(Icons.Default.Archive, "خروجی ZIP پروژه") }
+                    IconButton(onClick = { provider=config.provider; model=config.model; endpoint=config.baseUrl; apiKey=""; settings=true }) { Icon(Icons.Default.Settings, "تنظیمات") }
+                }
             )
         },
         bottomBar = {
@@ -89,31 +134,23 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                             val history=lines.dropLast(1).map { ChatMessage(it.role,it.text) }
                             activeJob = scope.launch {
                                 try {
-                                    if (config.provider == "anthropic") {
-                                        var response=""
-                                        client.stream(config,secret,history).collect { part ->
-                                            response += part
-                                            lines[lines.lastIndex]=LiveLine("assistant",response)
-                                        }
-                                    } else {
-                                        val result = runtime.run(
-                                            config = config,
-                                            apiKey = secret,
-                                            conversation = history.map { it.role to it.content },
-                                            approveWrite = { path ->
-                                                val gate = CompletableDeferred<Boolean>()
-                                                approvalPath = path
-                                                approvalDecision = gate
-                                                try { gate.await() } finally {
-                                                    approvalPath = null
-                                                    approvalDecision = null
-                                                }
+                                    val result = runtime.run(
+                                        config = config,
+                                        apiKey = secret,
+                                        conversation = history.map { it.role to it.content },
+                                        approveWrite = { path ->
+                                            val gate = CompletableDeferred<Boolean>()
+                                            approvalPath = path
+                                            approvalDecision = gate
+                                            try { gate.await() } finally {
+                                                approvalPath = null
+                                                approvalDecision = null
                                             }
-                                        )
-                                        val toolSummary = if (result.toolLog.isEmpty()) "" else
-                                            "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
-                                        lines[lines.lastIndex]=LiveLine("assistant",result.answer + toolSummary)
-                                    }
+                                        }
+                                    )
+                                    val toolSummary = if (result.toolLog.isEmpty()) "" else
+                                        "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
+                                    lines[lines.lastIndex]=LiveLine("assistant",result.answer + toolSummary)
                                     persistHistory()
                                     status="درخواست به پایان رسید."
                                 } catch(e: CancellationException) {
