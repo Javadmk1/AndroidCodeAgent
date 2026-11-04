@@ -81,7 +81,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var profiles by remember { mutableStateOf(configs.loadProfiles()) }
     var profilesExpanded by remember { mutableStateOf(false) }
     var prompt by remember { mutableStateOf("") }
-    var settings by remember { mutableStateOf(false) }\n    var menuExpanded by remember { mutableStateOf(false) }
+    var settings by remember { mutableStateOf(false) }
+    var menuExpanded by remember { mutableStateOf(false) }
     var showWorkspace by remember { mutableStateOf(false) }
     var showHtmlPreview by remember { mutableStateOf(false) }
     var showBuildManager by remember { mutableStateOf(false) }
