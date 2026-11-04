@@ -33,18 +33,15 @@ jobs:
         run: gradle -p android --no-daemon testDebugUnitTest
       - name: Build debug APK
         run: gradle -p android --no-daemon assembleDebug
-      - name: Prepare release signing key
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+      - name: Build signed release APK when signing secrets exist
         run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release-keystore.jks"
-      - name: Build signed release APK
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
-        env:
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release-keystore.jks
-          ANDROID_KEYSTORE_PASSWORD: ${{ env.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ env.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ env.ANDROID_KEY_PASSWORD }}
-        run: gradle -p android --no-daemon assembleRelease
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release-keystore.jks"
+            export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release-keystore.jks"
+            gradle -p android --no-daemon assembleRelease
+          else
+            echo "Release signing secrets are not configured; skipping signed release build."
+          fi
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -52,9 +49,8 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - name: Upload signed release APK
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: android-code-agent-release
           path: android/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
+          if-no-files-found: ignore
