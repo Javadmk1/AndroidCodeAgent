@@ -28,6 +28,10 @@ class SecureKeyStore(context: Context) {
         check(prefs.edit().putString("${provider}_iv", iv).putString("${provider}_data", body).commit()) {
             "Could not persist encrypted key"
         }
+        // Verify persistence and Keystore decryption before reporting success.
+        check(read(provider) == apiKey) {
+            "API key was written but could not be verified. Re-enter the key and try again."
+        }
     }
 
     fun read(provider: String): String? {
