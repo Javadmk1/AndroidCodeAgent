@@ -219,7 +219,14 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                             persistHistory()
                             busy=true
                             status="در حال پردازش درخواست..."
-                            val history=lines.dropLast(1).map { ChatMessage(it.role,it.text) }.toMutableList()\n                            val userIndex = history.indexOfLast { it.role == "user" }\n                            if (userIndex >= 0 && pendingImageData != null && pendingImageMime != null) {\n                                history[userIndex] = ChatMessage("user", question + "\\n[[IMAGE:" + pendingImageMime + ":" + pendingImageData + "]]")\n                            }\n                            pendingImageData = null\n                            pendingImageMime = null\n                            pendingAttachmentName = null
+                            val history = lines.dropLast(1).map { ChatMessage(it.role, it.text) }.toMutableList()
+                            val userIndex = history.indexOfLast { it.role == "user" }
+                            if (userIndex >= 0 && pendingImageData != null && pendingImageMime != null) {
+                                history[userIndex] = ChatMessage("user", question + "\n[[IMAGE:" + pendingImageMime + ":" + pendingImageData + "]]")
+                            }
+                            pendingImageData = null
+                            pendingImageMime = null
+                            pendingAttachmentName = null
                             activeJob = scope.launch {
                                 try {
                                     val result = runtime.run(
