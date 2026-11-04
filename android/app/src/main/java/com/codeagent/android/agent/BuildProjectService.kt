@@ -74,7 +74,7 @@ class BuildProjectService(
     private fun createArchive(root: File, output: File) {
         var count = 0
         var total = 0L
-        val excluded = setOf(".git", ".gradle", ".idea", ".kotlin", "build")
+        val excluded = setOf(".git", ".gradle", ".idea", ".kotlin", "build", "local.properties")
         ZipOutputStream(output.outputStream().buffered()).use { zip ->
             root.walkTopDown().forEach { file ->
                 val relative = root.toPath().relativize(file.toPath()).toString()
@@ -82,6 +82,14 @@ class BuildProjectService(
                 if (relative.split(File.separatorChar).any { it in excluded }) return@forEach
                 if (file.isDirectory) return@forEach
                 require(file.isFile && !Files.isSymbolicLink(file.toPath())) { "فایل نامعتبر یا پیوند نمادین در پروژه: $relative" }
+                val lowerName = file.name.lowercase()
+                require(lowerName != "key.properties" && lowerName != "google-services.json" &&
+                    !lowerName.endsWith(".jks") && !lowerName.endsWith(".keystore") &&
+                    !lowerName.endsWith(".p12") && !lowerName.endsWith(".pfx") &&
+                    !lowerName.endsWith(".pem") && lowerName != ".env" &&
+                    !lowerName.contains("service-account") && !lowerName.contains("credentials")) {
+                    "فایل دارای نام حساس شناسایی شد؛ قبل از آپلود آن را از پروژه خارج کن: $relative"
+                }
                 val size = file.length()
                 require(size <= 10L * 1024 * 1024) { "فایل $relative بیش از ۱۰ مگابایت است." }
                 total += size
