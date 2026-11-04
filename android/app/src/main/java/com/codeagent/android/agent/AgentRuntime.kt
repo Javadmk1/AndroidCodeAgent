@@ -25,7 +25,8 @@ class AgentRuntime(
         val anthropic = config.provider == "anthropic"
         val messages = JSONArray()
         conversation.filter { it.first != "system" }.forEach { (role, content) ->
-            messages.put(JSONObject().put("role", if (role == "assistant") "assistant" else "user").put("content", content))
+            val providerContent = multimodalContent(content, anthropic)
+            messages.put(JSONObject().put("role", if (role == "assistant") "assistant" else "user").put("content", providerContent))
         }
         val system = conversation.filter { it.first == "system" }.joinToString("\n") { it.second }
         val logs = mutableListOf<String>()
@@ -80,6 +81,31 @@ class AgentRuntime(
             finalResponse.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
         }
         Result(answer.ifBlank { "سقف اجرای ابزارها تمام شد؛ درخواست را دقیق‌تر و مرحله‌ای‌تر بنویس." }, logs)
+    }
+
+
+    private fun multimodalContent(raw: String, anthropic: Boolean): Any {
+        val marker = Regex("""\\[\\[IMAGE:([a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+):([A-Za-z0-9+/=]+)]]""")
+        val matches = marker.findAll(raw).toList()
+        if (matches.isEmpty()) return raw
+        val text = marker.replace(raw, "").trim()
+        val blocks = JSONArray()
+        if (text.isNotBlank()) {
+            if (anthropic) blocks.put(JSONObject().put("type", "text").put("text", text))
+            else blocks.put(JSONObject().put("type", "text").put("text", text))
+        }
+        matches.forEach { match ->
+            val mime = match.groupValues[1]
+            val data = match.groupValues[2]
+            if (anthropic) {
+                blocks.put(JSONObject().put("type", "image").put("source",
+                    JSONObject().put("type", "base64").put("media_type", mime).put("data", data)))
+            } else {
+                blocks.put(JSONObject().put("type", "image_url").put("image_url",
+                    JSONObject().put("url", "data:$mime;base64,$data")))
+            }
+        }
+        return blocks
     }
 
     private suspend fun request(
