@@ -314,6 +314,12 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                                 }
                                                             }
                                                         },
+                                                        onActivity = { event ->
+                                                            withContext(Dispatchers.Main.immediate) {
+                                                                agentEvents.add(event)
+                                                                if (agentEvents.size > 80) agentEvents.removeAt(0)
+                                                            }
+                                                        },
                                                         approveWrite = { path, content ->
                                                             val gate = CompletableDeferred<Boolean>()
                                                             approvalPath = path
