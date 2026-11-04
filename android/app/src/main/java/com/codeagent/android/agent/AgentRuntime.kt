@@ -72,7 +72,7 @@ class AgentRuntime(
                     val name = function.optString("name")
                     val args = JSONObject(function.optString("arguments", "{}"))
                     onActivity("اجرای ابزار: $name")
-                    val result = registry.execute(name, args, approveWrite)
+                    val result = registry.execute(name, args, approveWrite, approveBuild, onActivity)
                     val logEntry = "$name: ${if (result.optBoolean("ok")) "انجام شد" else result.optString("error", "رد شد")}"
                     logs += logEntry
                     onActivity(logEntry)
