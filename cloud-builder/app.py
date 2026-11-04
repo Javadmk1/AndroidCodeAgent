@@ -101,6 +101,7 @@ async def execute_job(job_id: str) -> None:
                 "--tmpfs", "/tmp:rw,nosuid,nodev,size=1g",
                 "--tmpfs", "/root/.gradle:rw,nosuid,nodev,size=2g",
                 "--tmpfs", "/root/.android:rw,nosuid,nodev,size=64m",
+                "--tmpfs", "/root/.kotlin:rw,nosuid,nodev,size=256m",
                 "--mount", "type=bind,src=" + str(source) + ",dst=/workspace",
                 "--mount", "type=bind,src=" + str(work / "outputs") + ",dst=/outputs",
                 "--workdir", "/workspace/" + project.relative_to(source).as_posix(),
