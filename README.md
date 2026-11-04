@@ -10,10 +10,12 @@ A native Android coding assistant foundation built with Kotlin and Jetpack Compo
 - OpenAI-compatible endpoints for providers such as DeepSeek, Qwen, Kimi and compatible gateways
 - Editable provider ID, model name and HTTPS base URL
 - API keys encrypted with AES-256-GCM; encryption key is held in Android Keystore
-- Model-driven OpenAI-compatible tool loop with a bounded number of rounds
+- Model-driven tool loop for OpenAI-compatible Chat Completions and Anthropic Messages APIs, with bounded rounds
 - Local workspace tools: list, read, search and approval-gated write
 - User approval dialog before every model-requested file write
 - Bounded local conversation history (last 80 messages)
+- SAF folder import into the private workspace and ZIP export
+- User-cancellable agent jobs (network cancellation is best-effort while a provider socket is blocked)
 - Workspace path traversal protection and 1 MB per-file limit
 - GitHub Actions debug APK build
 
@@ -42,8 +44,8 @@ GitHub Actions builds a debug APK on pushes to `main` and manual workflow dispat
 - Local file tools are confined to the app-owned workspace directory.
 - File writes require an approval callback from the controller.
 - Arbitrary shell execution is deliberately not enabled.
-- Model-driven tool calling currently uses OpenAI-compatible Chat Completions providers; Anthropic is currently chat-only.
-- Workspace is app-private. User-selected external project folders and SAF import/export are not implemented yet.
+- Model-driven tools are supported for OpenAI-compatible Chat Completions and Anthropic Messages. Some third-party compatible gateways may not implement tool calling correctly.
+- Imported projects are copied into an app-private workspace. Import/export is bounded to 100 MB and 5,000 files; hidden folders, .git, .gradle and build outputs are skipped.
 - On-device Gradle/Android SDK build worker, APK signing/release flow, and automated repair loop are not implemented yet.
 - Conversation history uses bounded app-private SharedPreferences JSON, not Room.
 
