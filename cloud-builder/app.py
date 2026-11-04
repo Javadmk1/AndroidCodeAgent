@@ -97,9 +97,10 @@ async def execute_job(job_id: str) -> None:
                 "docker", "run", "--rm",
                 "--network=bridge",
                 "--cpus=2", "--memory=5g", "--pids-limit=256",
-                "--security-opt=no-new-privileges", "--cap-drop=ALL",
+                "--security-opt=no-new-privileges", "--cap-drop=ALL", "--read-only",
                 "--tmpfs", "/tmp:rw,nosuid,nodev,size=1g",
                 "--tmpfs", "/root/.gradle:rw,nosuid,nodev,size=2g",
+                "--tmpfs", "/root/.android:rw,nosuid,nodev,size=64m",
                 "--mount", "type=bind,src=" + str(source) + ",dst=/workspace",
                 "--mount", "type=bind,src=" + str(work / "outputs") + ",dst=/outputs",
                 "--workdir", "/workspace/" + project.relative_to(source).as_posix(),
@@ -150,7 +151,9 @@ async def get_environment(authorization: str | None = Header(default=None)):
     require_auth(authorization)
     command = [
         "docker", "run", "--rm", "--network=none", "--cpus=1", "--memory=1g",
-        "--pids-limit=64", "--security-opt=no-new-privileges", "--cap-drop=ALL",
+        "--pids-limit=64", "--security-opt=no-new-privileges", "--cap-drop=ALL", "--read-only",
+        "--tmpfs", "/tmp:rw,nosuid,nodev,size=128m",
+        "--tmpfs", "/root/.android:rw,nosuid,nodev,size=64m",
         WORKER_IMAGE, "bash", "-lc",
         "java -version 2>&1; gradle --version | head -n 6; sdkmanager --list_installed 2>/dev/null | grep -E 'platforms;|build-tools;' | tail -n 20"
     ]
