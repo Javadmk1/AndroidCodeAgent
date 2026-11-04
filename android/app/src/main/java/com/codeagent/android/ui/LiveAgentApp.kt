@@ -203,17 +203,6 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                 title = { Column { Text("Android Code Agent"); Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall) } },
                 actions = {
                     IconButton(onClick = { showConversationList = true }, enabled = !busy) { Icon(Icons.Default.Forum, "فهرست گفتگوها") }
-                    IconButton(onClick = {
-                        persistHistory()
-                        val created = historyStore.create()
-                        conversations = historyStore.loadAll()
-                        activeConversationId = created.id
-                        prompt = ""
-                        pendingImageData = null
-                        pendingImageMime = null
-                        pendingAttachmentName = null
-                        status = "گفتگوی جدید ساخته شد."
-                    }, enabled = !busy) { Icon(Icons.Default.Add, "گفتگوی جدید") }
                     IconButton(onClick = { importLauncher.launch(null) }, enabled = !transferBusy) { Icon(Icons.Default.FolderOpen, "وارد کردن پوشه پروژه") }
                     IconButton(onClick = { showWorkspace = true }) { Icon(Icons.Default.Folder, "مرور و ویرایش فایل‌های پروژه") }
                     IconButton(onClick = { showHtmlPreview = true }, enabled = !htmlPreview.isNullOrBlank()) { Icon(Icons.Default.Code, "پیش‌نمایش HTML") }
