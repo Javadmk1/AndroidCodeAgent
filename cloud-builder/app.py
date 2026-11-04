@@ -22,6 +22,12 @@ JOBS: dict[str, dict[str, Any]] = {}
 LOCK = asyncio.Semaphore(1)
 app = FastAPI(title="Android Code Agent Isolated Builder", version="1.0")
 
+def validate_gradle_task(task: str) -> str:
+    if task not in ALLOWED_GRADLE_TASKS:
+        raise ValueError("Gradle task is not in the allowed command list")
+    return task
+
+
 
 def require_auth(header: str | None) -> None:
     if not TOKEN:
@@ -172,8 +178,10 @@ async def create_build(
     require_auth(authorization)
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(400, "Upload a ZIP project archive")
-    if gradle_task not in ALLOWED_GRADLE_TASKS:
-        raise HTTPException(400, "Gradle task is not in the allowed command list")
+    try:
+        validate_gradle_task(gradle_task)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     job_id = uuid.uuid4().hex
     work = Path(tempfile.mkdtemp(prefix="aca-build-"))
     source = work / "source"
