@@ -340,7 +340,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                                 agentEvents.add(event)
                                                                 if (agentEvents.size > 80) agentEvents.removeAt(0)
                                                                 if (event.contains("APK ساخته و دریافت شد")) buildOutput = event + "\nفایل خروجی در بخش ساخت APK آماده ذخیره است."
-                                                                if (event.contains("Gradle") || event.contains("BUILD ") || event.contains("Task :")) buildLog = (buildLog + "\n" + event).takeLast(12000)
+                                                                if (event.startsWith("وضعیت ساخت:")) buildStatus = event
+                                                                if (buildApprovalTask != null) buildLog = (buildLog + "\n" + event).takeLast(12000)
                                                             }
                                                         },
                                                         approveWrite = { path, content ->
