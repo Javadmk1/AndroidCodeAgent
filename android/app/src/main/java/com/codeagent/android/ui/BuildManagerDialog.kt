@@ -22,7 +22,13 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
-fun BuildManagerDialog(\n    keys: SecureKeyStore,\n    onDismiss: () -> Unit,\n    onBuildStatus: (String) -> Unit = {},\n    onBuildLog: (String) -> Unit = {},\n    onBuildOutput: (String) -> Unit = {}\n) {
+fun BuildManagerDialog(
+    keys: SecureKeyStore,
+    onDismiss: () -> Unit,
+    onBuildStatus: (String) -> Unit = {},
+    onBuildLog: (String) -> Unit = {},
+    onBuildOutput: (String) -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val client = remember(context) { CloudBuildClient(context) }
