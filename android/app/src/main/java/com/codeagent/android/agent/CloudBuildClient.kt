@@ -14,8 +14,34 @@ data class CloudBuildStatus(val status: String, val log: String, val error: Stri
 
 class CloudBuildClient(private val context: Context) {
     fun validateEndpoint(endpoint: String): String {
-        require(endpoint.startsWith("https://")) { "HTTPS endpoint required" }
-        return endpoint.trimEnd('/')
+        val uri = URL(endpoint.trim()).toURI()
+        require(uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()) {
+            "یک نشانی HTTPS معتبر برای سرویس ساخت وارد کن."
+        }
+        require(uri.userInfo == null && uri.query == null && uri.fragment == null) {
+            "نشانی سرویس نباید شامل اطلاعات ورود، query یا fragment باشد."
+        }
+        return uri.toString().trimEnd('/')
+    }
+
+    fun validateTask(task: String): String {
+        require(task in ALLOWED_TASKS) { "این فرمان در فهرست امن Gradle نیست." }
+        return task
+    }
+
+    suspend fun getEnvironment(endpoint: String, token: String): String = withContext(Dispatchers.IO) {
+        val connection = URL(validateEndpoint(endpoint) + "/v1/environment").openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("Authorization", "Bearer " + token)
+            connection.connectTimeout = 15000
+            connection.readTimeout = 100000
+            val code = connection.responseCode
+            val body = (if (code in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) error("SDK environment error $code: ${body.take(500)}")
+            JSONObject(body).optString("output")
+        } finally { connection.disconnect() }
     }
 
     suspend fun getStatus(endpoint: String, token: String, buildId: String): CloudBuildStatus =
@@ -39,8 +65,9 @@ class CloudBuildClient(private val context: Context) {
             }
         }
 
-    suspend fun submitZip(endpoint: String, token: String, zipUri: Uri, projectDir: String): String =
+    suspend fun submitZip(endpoint: String, token: String, zipUri: Uri, projectDir: String, gradleTask: String = "assembleDebug"): String =
         withContext(Dispatchers.IO) {
+            val task = validateTask(gradleTask)
             val boundary = "----ACA" + UUID.randomUUID().toString().replace("-", "")
             val connection = (URL(validateEndpoint(endpoint) + "/v1/builds").openConnection() as HttpURLConnection)
             try {
@@ -54,6 +81,7 @@ class CloudBuildClient(private val context: Context) {
                 connection.outputStream.use { output ->
                     fun write(value: String) { output.write(value.toByteArray(Charsets.UTF_8)) }
                     write("--$boundary\r\nContent-Disposition: form-data; name=\"project_dir\"\r\n\r\n$projectDir\r\n")
+                    write("--$boundary\r\nContent-Disposition: form-data; name=\"gradle_task\"\r\n\r\n$task\r\n")
                     write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"project.zip\"\r\nContent-Type: application/zip\r\n\r\n")
                     context.contentResolver.openInputStream(zipUri)?.use { input ->
                         val buffer = ByteArray(32768)
@@ -75,6 +103,8 @@ class CloudBuildClient(private val context: Context) {
             }
         }
 
+
+    private companion object { val ALLOWED_TASKS = setOf("tasks", "assembleDebug", "testDebugUnitTest", "lintDebug", "check", "clean") }
 
     suspend fun downloadArtifact(endpoint: String, token: String, buildId: String): File =
         withContext(Dispatchers.IO) {

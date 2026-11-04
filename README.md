@@ -62,3 +62,22 @@ Keep the original keystore and passwords backed up securely. Losing the signing 
 - Conversation history uses bounded app-private SharedPreferences JSON, not Room.
 
 Do not commit API keys, signing keys, or local machine configuration.
+
+## Multi-project workspaces and approved build tool
+
+- Projects are stored in separate app-private directories under `files/projects/<project-id>`.
+- The project catalog supports create, switch, rename and delete. Deleting a project removes its files and requires a separate confirmation in the UI.
+- Existing `files/workspace` content is migrated into the default project on first launch after this upgrade.
+- The agent exposes `build_project` as an LLM tool. Every build request requires an explicit user approval dialog before source upload or execution.
+- Supported Gradle tasks are allowlisted: `tasks`, `assembleDebug`, `testDebugUnitTest`, `lintDebug`, `check`, and `clean`.
+- `assembleDebug` downloads the APK artifact into app cache; the Build Manager can extract and save an individual APK or the complete ZIP.
+- The terminal panel is a controlled Gradle console, not an unrestricted Android/Linux shell. Android SDK, JDK and Gradle environment information is queried from the configured builder.
+- No arbitrary shell command, host filesystem access, signing secrets, or provider API keys are passed to the build container.
+
+## Cloud builder deployment requirement
+
+The build service is self-hosted; this repository does not include a hosted build endpoint. To enable automatic builds, deploy `cloud-builder` on a dedicated Linux VM with Docker, a reverse proxy providing HTTPS, and a long random `BUILDER_TOKEN`. Configure the HTTPS endpoint and token in the app's Build Manager. Without this deployment, the agent can edit and manage projects but cannot remotely compile them.
+
+### Isolated builder limits
+
+The worker runs one job at a time in a disposable Docker container with CPU, memory and process limits, dropped capabilities and no-new-privileges. ZIP uploads are capped at 100 MB and expanded content at 300 MB. Gradle project scripts execute during a build and have network access to download dependencies; do not include credentials, signing keystores or other secrets in uploaded project files. This is a controlled single-user build worker, not a hardened multi-tenant service.

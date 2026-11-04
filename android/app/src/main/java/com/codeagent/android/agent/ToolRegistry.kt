@@ -6,11 +6,18 @@ import org.json.JSONObject
  * Local tool dispatcher. Read-only operations are immediate; writes require
  * an explicit approval callback supplied by the UI/controller.
  */
-class ToolRegistry(private val workspace: WorkspaceTools) {
+class ToolRegistry(
+    private val workspace: WorkspaceTools,
+    private val buildProject: suspend (String, suspend (String) -> Unit) -> JSONObject = { _, _ ->
+        JSONObject().put("ok", false).put("error", "Build service is not configured")
+    }
+) {
     suspend fun execute(
         toolName: String,
         arguments: JSONObject,
-        approveWrite: suspend (path: String, content: String) -> Boolean
+        approveWrite: suspend (path: String, content: String) -> Boolean,
+        approveBuild: suspend (task: String) -> Boolean = { false },
+        onActivity: suspend (String) -> Unit = {}
     ): JSONObject {
         return when (toolName) {
             "list_files" -> {
@@ -31,6 +38,16 @@ class ToolRegistry(private val workspace: WorkspaceTools) {
                 }
                 JSONObject().put("ok", true).put("matches", array)
             }
+            "build_project" -> {
+                val task = arguments.optString("task", "assembleDebug")
+                if (task !in ALLOWED_BUILD_TASKS) {
+                    JSONObject().put("ok", false).put("error", "Gradle task is not in the approved allowlist")
+                } else if (!approveBuild(task)) {
+                    JSONObject().put("ok", false).put("error", "User denied build execution")
+                } else {
+                    buildProject(task, onActivity)
+                }
+            }
             "write_file" -> {
                 val path = arguments.getString("path")
                 if (!approveWrite(path, arguments.getString("content"))) {
@@ -44,5 +61,9 @@ class ToolRegistry(private val workspace: WorkspaceTools) {
         }
     }
 
-    fun toolNames(): List<String> = listOf("list_files", "read_file", "search_in_files", "write_file")
+    fun toolNames(): List<String> = listOf("list_files", "read_file", "search_in_files", "write_file", "build_project")
+
+    private companion object {
+        val ALLOWED_BUILD_TASKS = setOf("tasks", "assembleDebug", "testDebugUnitTest", "lintDebug", "check", "clean")
+    }
 }
