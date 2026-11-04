@@ -1,6 +1,6 @@
 package com.codeagent.android.agent
 
-import java.nio.file.Files
+import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -9,9 +9,15 @@ import org.junit.Test
 import kotlinx.coroutines.runBlocking
 
 class ToolRegistryTest {
+    private fun newWorkspaceDir(): File =
+        File.createTempFile("agent-workspace-", "").apply {
+            check(delete()) { "Could not prepare workspace temp directory" }
+            check(mkdir()) { "Could not create workspace temp directory" }
+        }
+
     @Test
     fun buildRequiresApprovalAndRunsOnlyAfterApproval() = runBlocking {
-        val workspaceDir = Files.createTempDirectory("agent-workspace-").toFile()
+        val workspaceDir = newWorkspaceDir()
         try {
             var executedTask: String? = null
             val registry = ToolRegistry(
@@ -46,7 +52,7 @@ class ToolRegistryTest {
 
     @Test
     fun unknownBuildTaskNeverRunsEvenWhenApproved() = runBlocking {
-        val workspaceDir = createTempDir(prefix = "agent-workspace-")
+        val workspaceDir = newWorkspaceDir()
         try {
             var executed = false
             val registry = ToolRegistry(
