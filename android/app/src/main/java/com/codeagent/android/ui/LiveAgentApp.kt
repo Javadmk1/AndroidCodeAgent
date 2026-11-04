@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,6 +42,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.ByteArrayOutputStream
+import android.util.Base64
+import android.net.Uri
+import android.provider.OpenableColumns
 
 private data class LiveLine(val role: String, val text: String)
 
@@ -67,6 +72,9 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var model by remember { mutableStateOf(config.model) }
     var endpoint by remember { mutableStateOf(config.baseUrl) }
     var apiKey by remember { mutableStateOf("") }
+    var pendingImageData by remember { mutableStateOf<String?>(null) }
+    var pendingImageMime by remember { mutableStateOf<String?>(null) }
+    var pendingAttachmentName by remember { mutableStateOf<String?>(null) }
     var profiles by remember { mutableStateOf(configs.loadProfiles()) }
     var profilesExpanded by remember { mutableStateOf(false) }
     var prompt by remember { mutableStateOf("") }
@@ -119,6 +127,49 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             } finally { transferBusy = false }
         }
     }
+    val attachmentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            try {
+                val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                } ?: "attachment"
+                val isImage = mime.startsWith("image/")
+                val limit = if (isImage) 4 * 1024 * 1024 else 512 * 1024
+                val bytes = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        val output = ByteArrayOutputStream()
+                        val buffer = ByteArray(8192)
+                        var total = 0
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            total += count
+                            require(total <= limit) { "فایل بزرگ‌تر از حد مجاز است." }
+                            output.write(buffer, 0, count)
+                        }
+                        output.toByteArray()
+                    } ?: error("خواندن فایل ممکن نشد.")
+                }
+                if (isImage) {
+                    pendingImageData = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    pendingImageMime = mime
+                    pendingAttachmentName = name
+                    status = "تصویر آماده ارسال است: $name"
+                } else if (mime.startsWith("text/") || name.substringAfterLast('.', "").lowercase() in setOf("txt","md","kt","java","html","css","js","json","xml","gradle","py","yml","yaml","csv")) {
+                    val textContent = String(bytes, Charsets.UTF_8)
+                    prompt = prompt + "\n\nفایل پیوست: $name\n\n$textContent"
+                    pendingAttachmentName = name
+                    status = "محتوای فایل به پیام اضافه شد: $name"
+                } else {
+                    status = "نوع فایل پشتیبانی نمی‌شود؛ تصویر یا فایل متنی انتخاب کن."
+                }
+            } catch (e: Exception) {
+                status = "خطای پیوست: ${e.message ?: "نامشخص"}"
+            }
+        }
+    }
+
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) scope.launch {
             transferBusy = true
@@ -168,7 +219,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                             persistHistory()
                             busy=true
                             status="در حال پردازش درخواست..."
-                            val history=lines.dropLast(1).map { ChatMessage(it.role,it.text) }
+                            val history=lines.dropLast(1).map { ChatMessage(it.role,it.text) }.toMutableList()\n                            val userIndex = history.indexOfLast { it.role == "user" }\n                            if (userIndex >= 0 && pendingImageData != null && pendingImageMime != null) {\n                                history[userIndex] = ChatMessage("user", question + "\\n[[IMAGE:" + pendingImageMime + ":" + pendingImageData + "]]")\n                            }\n                            pendingImageData = null\n                            pendingImageMime = null\n                            pendingAttachmentName = null
                             activeJob = scope.launch {
                                 try {
                                     val result = runtime.run(
