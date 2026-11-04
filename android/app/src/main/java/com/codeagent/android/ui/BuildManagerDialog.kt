@@ -38,6 +38,8 @@ fun BuildManagerDialog(
     var branch by remember { mutableStateOf("main") }
     var projectFolder by remember { mutableStateOf(".") }
     var task by remember { mutableStateOf("assembleDebug") }
+    var taskMenu by remember { mutableStateOf(false) }
+    var sdkInfo by remember { mutableStateOf("محیط Android SDK هنوز بررسی نشده است.") }
     var cloudEndpoint by remember { mutableStateOf(prefs.getString("endpoint", "") ?: "") }
     var cloudToken by remember { mutableStateOf(keys.read("cloud_builder") ?: "") }
     var cloudProjectDir by remember { mutableStateOf(".") }
@@ -96,7 +98,16 @@ fun BuildManagerDialog(
                 OutlinedTextField(repo, { repo = it }, label = { Text("مخزن عمومی owner/name") }, singleLine = true)
                 OutlinedTextField(branch, { branch = it }, label = { Text("شاخه یا commit") }, singleLine = true)
                 OutlinedTextField(projectFolder, { projectFolder = it }, label = { Text("پوشه پروژه") }, singleLine = true)
-                OutlinedTextField(task, { task = it }, label = { Text("Gradle task") }, singleLine = true)
+                Box {
+                    OutlinedButton(onClick = { taskMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("دستور امن: $task")
+                    }
+                    DropdownMenu(expanded = taskMenu, onDismissRequest = { taskMenu = false }) {
+                        listOf("tasks", "assembleDebug", "testDebugUnitTest", "lintDebug", "check", "clean").forEach { option ->
+                            DropdownMenuItem(text = { Text(option) }, onClick = { task = option; taskMenu = false })
+                        }
+                    }
+                }
                 Button(onClick = {
                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                     val values = "repository=$repo\nref=$branch\nproject_dir=$projectFolder\ngradle_task=$task"
@@ -107,6 +118,23 @@ fun BuildManagerDialog(
                 }
                 HorizontalDivider()
                 Text("ساخت ابری با آپلود ZIP", style = MaterialTheme.typography.titleSmall)
+                Text("ترمینال امن و Android SDK", style = MaterialTheme.typography.titleSmall)
+                Text("دستورات آزاد سیستم اجرا نمی‌شوند. فقط فرمان‌های Gradle مجاز در محیط ایزوله اجرا می‌شوند.", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = {
+                    scope.launch {
+                        try {
+                            sdkInfo = client.getEnvironment(cloudEndpoint, cloudToken)
+                            status = "محیط Android SDK آماده است."
+                        } catch (e: Exception) {
+                            sdkInfo = "بررسی SDK ناموفق بود: ${e.message ?: "نامشخص"}"
+                            status = sdkInfo
+                        }
+                    }
+                }, enabled = cloudEndpoint.isNotBlank() && cloudToken.isNotBlank() && !busy, modifier = Modifier.fillMaxWidth()) {
+                    Text("بررسی Android SDK / JDK / Gradle")
+                }
+                Text(sdkInfo.takeLast(1800), style = MaterialTheme.typography.bodySmall)
+
                 OutlinedTextField(cloudEndpoint, { cloudEndpoint = it }, label = { Text("آدرس HTTPS سرویس ساخت") }, singleLine = true)
                 OutlinedTextField(cloudToken, { cloudToken = it }, label = { Text("توکن سرویس ساخت") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
                 OutlinedTextField(cloudProjectDir, { cloudProjectDir = it }, label = { Text("پوشه پروژه داخل ZIP") }, singleLine = true)
@@ -136,7 +164,7 @@ fun BuildManagerDialog(
                                 val selected = zipUri ?: error("ابتدا فایل ZIP پروژه را انتخاب کن.")
                                 require(token.isNotBlank()) { "توکن سرویس ساخت ذخیره نشده است." }
                                 status = "در حال بارگذاری پروژه..."
-                                val id = client.submitZip(endpoint, token, selected, cloudProjectDir.trim())
+                                val id = client.submitZip(endpoint, token, selected, cloudProjectDir.trim(), task)
                                 buildId = id
                                 status = "ساخت در صف قرار گرفت."
                                 var attempts = 0
@@ -150,9 +178,13 @@ fun BuildManagerDialog(
                                         "failed" -> "ساخت ناموفق بود: ${result.error ?: "خطای Gradle"}"
                                         else -> "وضعیت: ${result.status}"
                                     }
-                                    if (result.status == "completed" && result.artifactReady) {
-                                        artifactFile = client.downloadArtifact(endpoint, token, id)
-                                        status = "APK آماده دریافت است."
+                                    if (result.status == "completed") {
+                                        if (result.artifactReady) {
+                                            artifactFile = client.downloadArtifact(endpoint, token, id)
+                                            status = "APK آماده دریافت است."
+                                        } else {
+                                            status = "دستور Gradle با موفقیت تمام شد."
+                                        }
                                         break
                                     }
                                     if (result.status == "failed") break
