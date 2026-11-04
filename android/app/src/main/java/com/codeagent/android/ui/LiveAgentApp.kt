@@ -358,14 +358,14 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                             pendingAttachmentName = null
                                         }
                                         showConversationList = false
-                                        status = "گفتگوی «\${item.title}» باز شد."
+                                        status = "گفتگوی «${item.title}» باز شد."
                                     },
                                     modifier = Modifier.weight(1f),
                                     enabled = !busy
                                 ) {
                                     Column(Modifier.fillMaxWidth()) {
                                         Text(item.title, maxLines = 1)
-                                        Text("\${item.messages.count { it.role == "user" }} پیام · \${if (item.id == activeConversationId) "فعال" else "ذخیره‌شده"}",
+                                        Text("${item.messages.count { it.role == "user" }} پیام · ${if (item.id == activeConversationId) "فعال" else "ذخیره‌شده"}",
                                             style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
