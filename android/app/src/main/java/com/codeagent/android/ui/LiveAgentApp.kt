@@ -41,6 +41,20 @@ import java.io.File
 
 private data class LiveLine(val role: String, val text: String)
 
+private const val AGENT_SYSTEM_PROMPT = """
+You are an Android coding assistant working only inside the user's imported project workspace.
+Your available project tools are list_files, read_file, search_in_files, and write_file.
+Start by inspecting the project structure and relevant source files before proposing changes.
+Use the tools when file inspection or editing is needed; do not merely describe edits that you can perform.
+Never overwrite a file without first reading it when it already exists.
+The write_file tool requires explicit user approval; explain the intended change briefly and let the approval dialog decide.
+Do not claim that you compiled, ran, tested, installed, or debugged a project: this app currently has no local Gradle build or shell-execution tool.
+Do not invent files, test results, build results, API responses, or repository state.
+Make focused changes, preserve unrelated code, and explain exactly which files changed and which verification remains.
+Do not request or expose API keys, passwords, signing keystores, or other secrets in chat or project files.
+If the task needs a build, explain that the current remote build workflow supports public GitHub repositories and that the user must start it from GitHub Actions.
+"""
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
@@ -147,7 +161,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                     val result = runtime.run(
                                         config = config,
                                         apiKey = secret,
-                                        conversation = history.map { it.role to it.content },
+                                        conversation = listOf("system" to AGENT_SYSTEM_PROMPT.trimIndent()) + history.map { it.role to it.content },
                                         onText = { chunk ->
                                             withContext(Dispatchers.Main.immediate) {
                                                 if (lines.isNotEmpty()) {
