@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Bounded tool loop for OpenAI-compatible and Anthropic Messages APIs. */
+/** Bounded tool loop. Text deltas are forwarded while the model response is arriving. */
 class AgentRuntime(
     private val registry: ToolRegistry,
     private val maxToolRounds: Int = 4
@@ -19,7 +19,8 @@ class AgentRuntime(
         config: ProviderConfig,
         apiKey: String,
         conversation: List<Pair<String, String>>,
-        approveWrite: suspend (String, String) -> Boolean
+        approveWrite: suspend (String, String) -> Boolean,
+        onText: suspend (String) -> Unit = {}
     ): Result = withContext(Dispatchers.IO) {
         val anthropic = config.provider == "anthropic"
         val messages = JSONArray()
@@ -30,15 +31,14 @@ class AgentRuntime(
         val logs = mutableListOf<String>()
 
         repeat(maxToolRounds) {
-            val response = request(config, apiKey, messages, anthropic, system)
+            val response = request(config, apiKey, messages, anthropic, system, onText)
             if (anthropic) {
                 val blocks = response.optJSONArray("content") ?: JSONArray()
                 val toolUses = (0 until blocks.length()).mapNotNull { blocks.optJSONObject(it) }
                     .filter { it.optString("type") == "tool_use" }
                 if (toolUses.isEmpty()) {
                     val answer = (0 until blocks.length()).mapNotNull { blocks.optJSONObject(it) }
-                        .filter { it.optString("type") == "text" }
-                        .joinToString("") { it.optString("text") }
+                        .filter { it.optString("type") == "text" }.joinToString("") { it.optString("text") }
                     return@withContext Result(answer, logs)
                 }
                 messages.put(JSONObject().put("role", "assistant").put("content", blocks))
@@ -71,7 +71,7 @@ class AgentRuntime(
             }
         }
 
-        val finalResponse = request(config, apiKey, messages, anthropic, system)
+        val finalResponse = request(config, apiKey, messages, anthropic, system, onText)
         val answer = if (anthropic) {
             val blocks = finalResponse.optJSONArray("content") ?: JSONArray()
             (0 until blocks.length()).mapNotNull { blocks.optJSONObject(it) }
@@ -82,91 +82,180 @@ class AgentRuntime(
         Result(answer.ifBlank { "سقف اجرای ابزارها تمام شد؛ درخواست را دقیق‌تر و مرحله‌ای‌تر بنویس." }, logs)
     }
 
-    private fun request(
+    private suspend fun request(
         config: ProviderConfig,
         apiKey: String,
         messages: JSONArray,
         anthropic: Boolean,
-        system: String
+        system: String,
+        onText: suspend (String) -> Unit
     ): JSONObject {
-        val tools = toolDefinitions()
         val body = if (anthropic) {
             JSONObject().put("model", config.model).put("max_tokens", 4096)
-                .put("messages", messages).put("tools", tools)
+                .put("stream", true).put("messages", messages).put("tools", anthropicTools())
                 .apply { if (system.isNotBlank()) put("system", system) }
         } else {
             val openAiMessages = JSONArray()
             if (system.isNotBlank()) openAiMessages.put(JSONObject().put("role", "system").put("content", system))
             for (index in 0 until messages.length()) openAiMessages.put(messages.get(index))
-            JSONObject().put("model", config.model).put("stream", false)
+            JSONObject().put("model", config.model).put("stream", true)
                 .put("messages", openAiMessages).put("tools", openAiTools()).put("tool_choice", "auto")
         }
         val endpoint = config.baseUrl.trimEnd('/') + if (anthropic) "/messages" else "/chat/completions"
         val connection = URL(endpoint).openConnection() as HttpURLConnection
-        return try {
+        try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000
             connection.readTimeout = 120_000
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("Accept", "text/event-stream")
             if (anthropic) {
                 connection.setRequestProperty("x-api-key", apiKey)
                 connection.setRequestProperty("anthropic-version", "2023-06-01")
             } else connection.setRequestProperty("Authorization", "Bearer $apiKey")
             connection.outputStream.bufferedWriter(Charsets.UTF_8).use { it.write(body.toString()) }
             val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) error("API error $code: ${text.take(1000)}")
-            JSONObject(text)
+            if (code !in 200..299) {
+                val errorText = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                error("API error $code: ${errorText.take(1000)}")
+            }
+            return if (anthropic) readAnthropicStream(connection, onText) else readOpenAiStream(connection, onText)
         } finally {
             connection.disconnect()
         }
     }
 
-    private fun toolDefinitions(): JSONArray {
-        val definitions = listOf(
-            Triple("list_files", "List files and folders inside the project workspace.", """{"type":"object","properties":{"path":{"type":"string"}}}"""),
-            Triple("read_file", "Read a UTF-8 text file from the project workspace.", """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"""),
-            Triple("search_in_files", "Search text inside project files.", """{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string"}},"required":["query"]}"""),
-            Triple("write_file", "Create or replace a UTF-8 text file. User approval is required.", """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}""")
-        )
-        return JSONArray().apply {
-            definitions.forEach { (name, description, schema) ->
-                val parameters = JSONObject(schema)
-                put(JSONObject().apply {
-                    if (name.isNotBlank()) put("name", name)
-                    if (description.isNotBlank()) put("description", description)
-                    if (name.isNotBlank()) put("input_schema", parameters)
-                    put("type", "function")
-                    put("function", JSONObject().put("name", name).put("description", description).put("parameters", parameters))
-                })
-            }
-        }.let { all ->
-            // Anthropic expects only name/description/input_schema; OpenAI expects type/function.
-            JSONArray().apply {
-                for (i in 0 until all.length()) {
-                    val item = all.getJSONObject(i)
-                    put(JSONObject().put("name", item.getString("name"))
-                        .put("description", item.getString("description"))
-                        .put("input_schema", item.getJSONObject("input_schema")))
+    private suspend fun readOpenAiStream(
+        connection: HttpURLConnection,
+        onText: suspend (String) -> Unit
+    ): JSONObject {
+        val message = JSONObject().put("role", "assistant").put("content", "")
+        val text = StringBuilder()
+        val calls = sortedMapOf<Int, JSONObject>()
+        connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (!line.startsWith("data:")) continue
+                val payload = line.removePrefix("data:").trim()
+                if (payload.isEmpty() || payload == "[DONE]") continue
+                val chunk = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+                val delta = chunk.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: continue
+                val content = delta.optString("content").takeUnless { it == "null" }.orEmpty()
+                if (content.isNotEmpty()) {
+                    text.append(content)
+                    onText(content)
+                }
+                val toolDeltas = delta.optJSONArray("tool_calls") ?: continue
+                for (i in 0 until toolDeltas.length()) {
+                    val part = toolDeltas.optJSONObject(i) ?: continue
+                    val index = part.optInt("index", i)
+                    val call = calls.getOrPut(index) {
+                        JSONObject().put("id", "").put("type", "function")
+                            .put("function", JSONObject().put("name", "").put("arguments", ""))
+                    }
+                    if (part.has("id")) call.put("id", call.optString("id") + part.optString("id"))
+                    val fn = part.optJSONObject("function")
+                    if (fn != null) {
+                        val target = call.getJSONObject("function")
+                        if (fn.has("name")) target.put("name", target.optString("name") + fn.optString("name"))
+                        if (fn.has("arguments")) target.put("arguments", target.optString("arguments") + fn.optString("arguments"))
+                    }
                 }
             }
         }
+        message.put("content", text.toString())
+        if (calls.isNotEmpty()) {
+            val array = JSONArray()
+            calls.values.forEach { call ->
+                val fn = call.getJSONObject("function")
+                val raw = fn.optString("arguments", "{}")
+                // Validate the accumulated arguments before passing them to the tool dispatcher.
+                runCatching { JSONObject(raw) }.getOrElse { throw IllegalStateException("Invalid streamed tool arguments for ${fn.optString("name")}.") }
+                array.put(call)
+            }
+            message.put("tool_calls", array)
+        }
+        return JSONObject().put("choices", JSONArray().put(JSONObject().put("message", message)))
     }
 
-    private fun openAiTools(): JSONArray {
-        val definitions = listOf(
-            Triple("list_files", "List files and folders inside the project workspace.", """{"type":"object","properties":{"path":{"type":"string"}}}"""),
-            Triple("read_file", "Read a UTF-8 text file from the project workspace.", """{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"""),
-            Triple("search_in_files", "Search text inside project files.", """{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string"}},"required":["query"]}"""),
-            Triple("write_file", "Create or replace a UTF-8 text file. User approval is required.", """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}""")
-        )
-        return JSONArray().apply {
-            definitions.forEach { (name, description, schema) ->
-                put(JSONObject().put("type", "function").put("function",
-                    JSONObject().put("name", name).put("description", description).put("parameters", JSONObject(schema))))
+    private suspend fun readAnthropicStream(
+        connection: HttpURLConnection,
+        onText: suspend (String) -> Unit
+    ): JSONObject {
+        val blocks = sortedMapOf<Int, JSONObject>()
+        val partialInputs = mutableMapOf<Int, StringBuilder>()
+        connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+            var eventName = ""
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (line.startsWith("event:")) {
+                    eventName = line.removePrefix("event:").trim()
+                    continue
+                }
+                if (!line.startsWith("data:")) continue
+                val payload = line.removePrefix("data:").trim()
+                if (payload.isEmpty() || payload == "[DONE]") continue
+                val event = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+                when (event.optString("type", eventName)) {
+                    "content_block_start" -> {
+                        val index = event.optInt("index")
+                        val block = event.optJSONObject("content_block") ?: JSONObject()
+                        blocks[index] = JSONObject(block.toString())
+                    }
+                    "content_block_delta" -> {
+                        val index = event.optInt("index")
+                        val delta = event.optJSONObject("delta") ?: continue
+                        when (delta.optString("type")) {
+                            "text_delta" -> {
+                                val value = delta.optString("text")
+                                val block = blocks.getOrPut(index) { JSONObject().put("type", "text").put("text", "") }
+                                block.put("text", block.optString("text") + value)
+                                if (value.isNotEmpty()) onText(value)
+                            }
+                            "input_json_delta" -> partialInputs.getOrPut(index) { StringBuilder() }
+                                .append(delta.optString("partial_json"))
+                        }
+                    }
+                    "content_block_stop" -> {
+                        val index = event.optInt("index")
+                        val raw = partialInputs.remove(index)?.toString()
+                        if (raw != null) {
+                            val block = blocks[index] ?: JSONObject()
+                            block.put("input", runCatching { JSONObject(raw) }.getOrElse { JSONObject() })
+                            blocks[index] = block
+                        }
+                    }
+                }
+                eventName = ""
             }
+        }
+        val content = JSONArray()
+        blocks.values.forEach { content.put(it) }
+        return JSONObject().put("content", content)
+    }
+
+    private fun schemas(): List<Triple<String, String, JSONObject>> = listOf(
+        Triple("list_files", "List files and folders inside the project workspace.",
+            JSONObject("""{"type":"object","properties":{"path":{"type":"string"}}}""")),
+        Triple("read_file", "Read a UTF-8 text file from the project workspace.",
+            JSONObject("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""")),
+        Triple("search_in_files", "Search text inside project files.",
+            JSONObject("""{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string"}},"required":["query"]}""")),
+        Triple("write_file", "Create or replace a UTF-8 text file. User approval is required.",
+            JSONObject("""{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"""))
+    )
+
+    private fun anthropicTools(): JSONArray = JSONArray().apply {
+        schemas().forEach { (name, description, schema) ->
+            put(JSONObject().put("name", name).put("description", description).put("input_schema", schema))
+        }
+    }
+
+    private fun openAiTools(): JSONArray = JSONArray().apply {
+        schemas().forEach { (name, description, schema) ->
+            put(JSONObject().put("type", "function").put("function",
+                JSONObject().put("name", name).put("description", description).put("parameters", schema)))
         }
     }
 }
