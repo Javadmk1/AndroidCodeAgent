@@ -1,6 +1,6 @@
 package com.codeagent.android.agent
 
-import android.content.ContentResolver
+import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
@@ -11,13 +11,13 @@ import java.util.zip.ZipOutputStream
 
 /** SAF import/export for a bounded app-private project workspace. */
 class ProjectTransfer(
-    private val resolver: ContentResolver,
+    private val context: Context,
     private val workspace: File
 ) {
     data class TransferResult(val files: Int, val bytes: Long)
 
     suspend fun importTree(treeUri: Uri): TransferResult = withContext(Dispatchers.IO) {
-        val root = DocumentFile.fromTreeUri(resolver.contextOrNull(), treeUri)
+        val root = DocumentFile.fromTreeUri(context, treeUri)
             ?: throw IllegalArgumentException("پوشهٔ انتخاب‌شده قابل خواندن نیست.")
         require(root.isDirectory) { "یک پوشه انتخاب کن." }
         var count = 0
@@ -38,7 +38,7 @@ class ProjectTransfer(
                     require(size in 0..MAX_FILE_BYTES) { "فایل $name بیش از ۱۰ مگابایت است." }
                     require(total + size <= MAX_TOTAL_BYTES) { "حجم پروژه بیش از ۱۰۰ مگابایت است." }
                     destination.parentFile?.mkdirs()
-                    resolver.openInputStream(child.uri)?.use { input ->
+                    context.contentResolver.openInputStream(child.uri)?.use { input ->
                         destination.outputStream().use { output ->
                             val buffer = ByteArray(8192)
                             while (true) {
@@ -64,7 +64,7 @@ class ProjectTransfer(
         require(workspace.isDirectory) { "فضای پروژه وجود ندارد." }
         var count = 0
         var total = 0L
-        resolver.openOutputStream(destination, "w")?.use { raw ->
+        context.contentResolver.openOutputStream(destination, "w")?.use { raw ->
             ZipOutputStream(raw).use { zip ->
                 workspace.walkTopDown().filter { it.isFile }.forEach { file ->
                     val relative = workspace.toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/')
