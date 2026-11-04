@@ -240,7 +240,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                 if (busy) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)
                                 else Icon(Icons.Default.Folder, null, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (busy) "ایجنت در حال کار است" else "Workspace · \${workspaceDirectory.name}", style = MaterialTheme.typography.labelSmall)
+                                Text(if (busy) "ایجنت در حال کار است" else "Workspace · " + workspaceDirectory.name, style = MaterialTheme.typography.labelSmall)
                             }
                         }
                         Spacer(Modifier.weight(1f))
@@ -324,7 +324,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                     persistHistory()
                                                     status = "درخواست لغو شد."
                                                 } catch (e: Exception) {
-                                                    lines[lines.lastIndex] = LiveLine("assistant", "خطا: \${e.message ?: "نامشخص"}")
+                                                    lines[lines.lastIndex] = LiveLine("assistant", "خطا: " + (e.message ?: "نامشخص"))
                                                     persistHistory()
                                                     status = "درخواست ناموفق بود؛ مدل، کلید، endpoint و پشتیبانی ابزارها را بررسی کن."
                                                 } finally {
