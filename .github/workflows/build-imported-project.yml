@@ -67,9 +67,19 @@ jobs:
           PROJECT_DIR: ${{ inputs.project_dir }}
         run: |
           set -euo pipefail
-          PROJECT_PATH="source/$PROJECT_DIR"
-          test -d "$PROJECT_PATH"
-          test -f "$PROJECT_PATH/gradlew" || test -f "$PROJECT_PATH/build.gradle" || test -f "$PROJECT_PATH/build.gradle.kts" || test -f "$PROJECT_PATH/settings.gradle" || test -f "$PROJECT_PATH/settings.gradle.kts"
+          python - "$PROJECT_DIR" <<'PY'
+          import pathlib
+          import sys
+          root = pathlib.Path("source").resolve()
+          project = (root / sys.argv[1]).resolve()
+          if project != root and root not in project.parents:
+              raise SystemExit("Project directory resolves outside the checked-out repository")
+          if not project.is_dir():
+              raise SystemExit("Project directory does not exist")
+          markers = ("gradlew", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts")
+          if not any((project / marker).is_file() for marker in markers):
+              raise SystemExit("No Gradle project files found in the selected directory")
+          PY
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
