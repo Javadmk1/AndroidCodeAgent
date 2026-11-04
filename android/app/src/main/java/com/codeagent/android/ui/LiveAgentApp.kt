@@ -280,11 +280,19 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                 TextButton(onClick={
                     try {
                         val next=ProviderConfig(provider.trim(),model.trim(),endpoint.trim())
+                        // Do not report success until the key is encrypted, persisted, and readable.
+                        if(apiKey.isNotBlank()) {
+                            keys.save(next.provider,apiKey.trim())
+                        } else if(keys.read(next.provider).isNullOrBlank()) {
+                            throw IllegalArgumentException("برای این سرویس کلید API وارد کن؛ کلید قبلی هم پیدا نشد.")
+                        }
                         configs.save(next)
-                        if(apiKey.isNotBlank()) keys.save(next.provider,apiKey.trim())
+                        check(!keys.read(next.provider).isNullOrBlank()) {
+                            "کلید API ذخیره شد اما هنگام بررسی دوباره خوانده نشد."
+                        }
                         config=next
                         apiKey=""
-                        status=if(keys.hasKey(next.provider)) "تنظیمات و کلید ذخیره شد." else "تنظیمات ذخیره شد؛ کلید API وارد نشده."
+                        status="تنظیمات و کلید API با موفقیت ذخیره و بررسی شد."
                         settings=false
                     } catch(e:Exception) { status="خطا در ذخیره: ${e.message ?: "نامشخص"}" }
                 }) { Text("ذخیره") }
