@@ -6,6 +6,7 @@ import com.codeagent.android.SecureKeyStore
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.io.File
+import java.nio.file.Files
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import java.util.zip.ZipFile
@@ -80,7 +81,7 @@ class BuildProjectService(
                 if (relative.isBlank()) return@forEach
                 if (relative.split(File.separatorChar).any { it in excluded }) return@forEach
                 if (file.isDirectory) return@forEach
-                require(file.isFile) { "فایل نامعتبر در پروژه: $relative" }
+                require(file.isFile && !Files.isSymbolicLink(file.toPath())) { "فایل نامعتبر یا پیوند نمادین در پروژه: $relative" }
                 val size = file.length()
                 require(size <= 10L * 1024 * 1024) { "فایل $relative بیش از ۱۰ مگابایت است." }
                 total += size
