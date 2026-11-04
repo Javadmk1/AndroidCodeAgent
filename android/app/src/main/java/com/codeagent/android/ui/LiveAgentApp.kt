@@ -4,6 +4,7 @@ import com.codeagent.android.SecureKeyStore
 import com.codeagent.android.agent.AgentRuntime
 import com.codeagent.android.agent.ProjectTransfer
 import com.codeagent.android.agent.ProjectStore
+import com.codeagent.android.agent.BuildProjectService
 import com.codeagent.android.agent.ToolRegistry
 import com.codeagent.android.agent.WorkspaceTools
 import com.codeagent.android.llm.*
@@ -54,6 +55,13 @@ import android.util.Base64
 import android.net.Uri
 import android.provider.OpenableColumns
 
+private fun visibleAssistantText(raw: String): String {
+    var value = Regex("(?is)<(think|analysis|reasoning)>.*?</\\\\1>").replace(raw, "")
+    val unfinished = Regex("(?is)<(think|analysis|reasoning)>").find(value)
+    if (unfinished != null) value = value.substring(0, unfinished.range.first)
+    return value
+}
+
 private data class LiveLine(val role: String, val text: String)
 private enum class MainTab { CHAT, PROJECTS, HISTORY, SETTINGS }
 
@@ -68,7 +76,7 @@ Do not reveal hidden reasoning or private deliberation. Show concise user-facing
 Do not invent files, test results, build results, API responses, or repository state.
 Make focused changes, preserve unrelated code, and explain exactly which files changed and which verification remains.
 Do not request or expose API keys, passwords, signing keystores, or other secrets in chat or project files.
-If the task needs a build, use the configured isolated project build service when available. Ask for confirmation before starting a build. If no builder is configured, explain the setup requirement clearly.
+If the task needs a build, use the configured isolated project build service when available. Ask for confirmation before starting a build. If no builder is configured, explain the setup requirement clearly. Never expose private reasoning, hidden analysis, or internal deliberation in user-visible messages.
 """
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -115,6 +123,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var approvalPath by remember { mutableStateOf<String?>(null) }
     var approvalPreview by remember { mutableStateOf("") }
     var approvalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
+    var buildApprovalTask by remember { mutableStateOf<String?>(null) }
+    var buildApprovalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     val scope = rememberCoroutineScope()
     val client = remember { LlmClient() }
     val projectStore = remember(context) { ProjectStore(context) }
@@ -124,8 +134,12 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     val activeProjectName = activeProject?.name ?: "پروژه من"
     val workspaceDirectory = remember(context, activeProjectId) { projectStore.directory(activeProjectId) }
     val transfer = remember(context, activeProjectId) { ProjectTransfer(context, workspaceDirectory) }
-    val runtime = remember(workspaceDirectory) {
-        AgentRuntime(ToolRegistry(WorkspaceTools(workspaceDirectory)))
+    val buildService = remember(context, keys) { BuildProjectService(context, keys) }
+    val runtime = remember(workspaceDirectory, buildService) {
+        AgentRuntime(ToolRegistry(
+            WorkspaceTools(workspaceDirectory),
+            buildProject = { task, report -> buildService.build(workspaceDirectory, task, report) }
+        ))
     }
     val lines = remember(historyStore, activeConversationId) {
         mutableStateListOf<LiveLine>().apply {
@@ -317,7 +331,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                             withContext(Dispatchers.Main.immediate) {
                                                                 if (lines.isNotEmpty()) {
                                                                     val current = lines.last()
-                                                                    lines[lines.lastIndex] = LiveLine("assistant", current.text + chunk)
+                                                                    lines[lines.lastIndex] = LiveLine("assistant", visibleAssistantText(current.text + chunk))
                                                                 }
                                                             }
                                                         },
@@ -325,6 +339,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                             withContext(Dispatchers.Main.immediate) {
                                                                 agentEvents.add(event)
                                                                 if (agentEvents.size > 80) agentEvents.removeAt(0)
+                                                                if (event.contains("APK ساخته و دریافت شد")) buildOutput = event + "\nفایل خروجی در بخش ساخت APK آماده ذخیره است."
+                                                                if (event.contains("Gradle") || event.contains("BUILD ") || event.contains("Task :")) buildLog = (buildLog + "\n" + event).takeLast(12000)
                                                             }
                                                         },
                                                         approveWrite = { path, content ->
@@ -337,12 +353,21 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                                 approvalPreview = ""
                                                                 approvalDecision = null
                                                             }
+                                                        },
+                                                        approveBuild = { task ->
+                                                            val gate = CompletableDeferred<Boolean>()
+                                                            buildApprovalTask = task
+                                                            buildApprovalDecision = gate
+                                                            try { gate.await() } finally {
+                                                                buildApprovalTask = null
+                                                                buildApprovalDecision = null
+                                                            }
                                                         }
                                                     )
                                                     val toolSummary = if (result.toolLog.isEmpty()) "" else "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
                                                     result.toolLog.forEach { agentEvents.add(it) }
                                                     agentEvents.add("پاسخ ایجنت دریافت و ذخیره شد.")
-                                                    lines[lines.lastIndex] = LiveLine("assistant", result.answer + toolSummary)
+                                                    lines[lines.lastIndex] = LiveLine("assistant", visibleAssistantText(result.answer) + toolSummary)
                                                     persistHistory()
                                                     status = "درخواست به پایان رسید."
                                                 } catch (e: CancellationException) {
@@ -633,6 +658,16 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                 status = "کلید API این سرویس حذف شد."
             }) { Text("حذف کلید") } },
             dismissButton = { TextButton(onClick = { confirmDeleteKey = false }) { Text("انصراف") } }
+        )
+    }
+
+    if (buildApprovalTask != null) {
+        AlertDialog(
+            onDismissRequest = { buildApprovalDecision?.complete(false) },
+            title = { Text("تأیید اجرای دستور ساخت") },
+            text = { Text("دستور Gradle: $buildApprovalTask\n\nپروژه برای ساخت به سرویس ابری پیکربندی‌شده ارسال می‌شود و داخل Docker محدود با Android SDK اجرا خواهد شد. اسکریپت‌های Gradle پروژه اجرا می‌شوند و برای دریافت وابستگی‌ها دسترسی شبکه دارند؛ هیچ کلید API یا رمز امضایی را داخل پروژه قرار نده.") },
+            confirmButton = { TextButton(onClick = { buildApprovalDecision?.complete(true) }) { Text("تأیید و اجرا") } },
+            dismissButton = { TextButton(onClick = { buildApprovalDecision?.complete(false) }) { Text("لغو") } }
         )
     }
 
