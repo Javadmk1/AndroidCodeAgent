@@ -53,8 +53,8 @@ class CloudBuildClient(private val context: Context) {
                 connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary)
                 connection.outputStream.use { output ->
                     fun write(value: String) { output.write(value.toByteArray(Charsets.UTF_8)) }
-                    write("--$boundary\\r\\nContent-Disposition: form-data; name=\\"project_dir\\"\\r\\n\\r\\n$projectDir\\r\\n")
-                    write("--$boundary\\r\\nContent-Disposition: form-data; name=\\"file\\"; filename=\\"project.zip\\"\\r\\nContent-Type: application/zip\\r\\n\\r\\n")
+                    write("--$boundary\r\nContent-Disposition: form-data; name=\"project_dir\"\r\n\r\n$projectDir\r\n")
+                    write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"project.zip\"\r\nContent-Type: application/zip\r\n\r\n")
                     context.contentResolver.openInputStream(zipUri)?.use { input ->
                         val buffer = ByteArray(32768)
                         while (true) {
@@ -63,7 +63,7 @@ class CloudBuildClient(private val context: Context) {
                             output.write(buffer, 0, count)
                         }
                     } ?: error("Could not read ZIP file")
-                    write("\\r\\n--$boundary--\\r\\n")
+                    write("\r\n--$boundary--\r\n")
                 }
                 val code = connection.responseCode
                 val body = (if (code in 200..299) connection.inputStream else connection.errorStream)
