@@ -56,7 +56,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 
 private fun visibleAssistantText(raw: String): String {
-    var value = Regex("(?is)<(think|analysis|reasoning)>.*?</\\\\1>").replace(raw, "")
+    var value = Regex("(?is)<(think|analysis|reasoning)>.*?</\\1>").replace(raw, "")
     val unfinished = Regex("(?is)<(think|analysis|reasoning)>").find(value)
     if (unfinished != null) value = value.substring(0, unfinished.range.first)
     return value
