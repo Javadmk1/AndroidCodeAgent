@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -52,6 +54,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 
 private data class LiveLine(val role: String, val text: String)
+private enum class MainTab { CHAT, PROJECTS, HISTORY, SETTINGS }
 
 private const val AGENT_SYSTEM_PROMPT = """
 You are an Android coding assistant working only inside the user's imported project workspace.
@@ -84,6 +87,12 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var prompt by remember { mutableStateOf("") }
     var settings by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableStateOf(MainTab.CHAT) }
+    var activityPanel by remember { mutableStateOf("activity") }
+    val agentEvents = remember { mutableStateListOf<String>() }
+    var buildStatus by remember { mutableStateOf("هنوز ساختی اجرا نشده است.") }
+    var buildLog by remember { mutableStateOf("") }
+    var buildOutput by remember { mutableStateOf("هنوز APK خروجی دریافت نشده است.") }
     var showWorkspace by remember { mutableStateOf(false) }
     var showHtmlPreview by remember { mutableStateOf(false) }
     var showBuildManager by remember { mutableStateOf(false) }
@@ -281,6 +290,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                             lines.add(LiveLine("assistant", ""))
                                             persistHistory()
                                             busy = true
+                                            agentEvents.add("شروع درخواست: " + question.take(90))
                                             status = "در حال پردازش درخواست..."
                                             val history = lines.dropLast(1).map { ChatMessage(it.role, it.text) }.toMutableList()
                                             val userIndex = history.indexOfLast { it.role == "user" }
@@ -317,6 +327,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                         }
                                                     )
                                                     val toolSummary = if (result.toolLog.isEmpty()) "" else "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
+                                                    result.toolLog.forEach { agentEvents.add(it) }
+                                                    agentEvents.add("پاسخ ایجنت دریافت و ذخیره شد.")
                                                     lines[lines.lastIndex] = LiveLine("assistant", result.answer + toolSummary)
                                                     persistHistory()
                                                     status = "درخواست به پایان رسید."
@@ -326,6 +338,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                 } catch (e: Exception) {
                                                     lines[lines.lastIndex] = LiveLine("assistant", "خطا: " + (e.message ?: "نامشخص"))
                                                     persistHistory()
+                                                    agentEvents.add("خطا: " + (e.message ?: "نامشخص"))
                                                     status = "درخواست ناموفق بود؛ مدل، کلید، endpoint و پشتیبانی ابزارها را بررسی کن."
                                                 } finally {
                                                     busy = false
@@ -350,23 +363,92 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            Text(status, Modifier.fillMaxWidth().padding(horizontal=14.dp, vertical=8.dp), style=MaterialTheme.typography.bodySmall)
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding=PaddingValues(12.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                itemsIndexed(lines) { index, line ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement=if(line.role=="user") Arrangement.End else Arrangement.Start) {
-                        Surface(color=if(line.role=="user") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, shape=RoundedCornerShape(16.dp), modifier=Modifier.widthIn(max=340.dp)) {
-                            Text(if(line.text.isBlank() && busy) "در حال دریافت پاسخ..." else line.text, Modifier.padding(12.dp))
+            when (selectedTab) {
+                MainTab.CHAT -> {
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding=PaddingValues(12.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                        itemsIndexed(lines) { index, line ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement=if(line.role=="user") Arrangement.End else Arrangement.Start) {
+                                Surface(color=if(line.role=="user") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, shape=RoundedCornerShape(16.dp), modifier=Modifier.widthIn(max=340.dp)) {
+                                    Text(if(line.text.isBlank() && busy) "در حال دریافت پاسخ..." else line.text, Modifier.padding(12.dp))
+                                }
+                                MessageActions(text = line.text, editable = line.role == "user") {
+                                    prompt = line.text
+                                    lines.subList(index, lines.size).clear()
+                                    persistHistory()
+                                    status = "پیام برای ویرایش به کادر نوشتن منتقل شد."
+                                }
+                            }
                         }
-                        MessageActions(text = line.text, editable = line.role == "user") {
-                            prompt = line.text
-                            lines.subList(index, lines.size).clear()
-                            persistHistory()
-                            status = "پیام برای ویرایش به کادر نوشتن منتقل شد."
+                    }
+                    Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal=10.dp, vertical=6.dp)) {
+                            Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                                listOf("activity" to "فعالیت ایجنت", "terminal" to "ترمینال", "build" to "گزارش ساخت", "output" to "خروجی APK").forEach { (key,label) ->
+                                    FilterChip(selected=activityPanel==key,onClick={activityPanel=key},label={Text(label)})
+                                }
+                            }
+                            when(activityPanel) {
+                                "activity" -> {
+                                    Text(if(busy) "● ایجنت مشغول است" else "● آماده", color=if(busy) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary, style=MaterialTheme.typography.labelMedium)
+                                    agentEvents.takeLast(4).forEach { Text(it, style=MaterialTheme.typography.bodySmall, maxLines=1) }
+                                }
+                                "terminal" -> Text("ترمینال اجرایی هنوز فعال نیست. این بخش فعلاً وضعیت محیط را نشان می‌دهد و فرمانی اجرا نمی‌کند.", style=MaterialTheme.typography.bodySmall)
+                                "build" -> {
+                                    Text(buildStatus, style=MaterialTheme.typography.bodySmall)
+                                    if(buildLog.isNotBlank()) Text(buildLog.takeLast(900), style=MaterialTheme.typography.bodySmall, maxLines=5)
+                                }
+                                "output" -> Text(buildOutput, style=MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
+                MainTab.PROJECTS -> ProjectHomeScreen(workspaceDirectory, { importLauncher.launch(null) }, { showWorkspace=true }, { showBuildManager=true }, { exportLauncher.launch("android-code-agent-project.zip") })
+                MainTab.HISTORY -> HistoryHomeScreen(
+                    conversations=conversations, activeId=activeConversationId,
+                    onNew={
+                        persistHistory()
+                        val created=historyStore.create()
+                        conversations=historyStore.loadAll()
+                        activeConversationId=created.id
+                        prompt=""
+                        selectedTab=MainTab.CHAT
+                    },
+                    onOpen={ item ->
+                        if(item.id!=activeConversationId) {
+                            persistHistory()
+                            activeConversationId=item.id
+                            prompt=""
+                            pendingImageData=null
+                            pendingImageMime=null
+                            pendingAttachmentName=null
+                        }
+                        selectedTab=MainTab.CHAT
+                        status="گفتگوی " + item.title + " باز شد."
+                    },
+                    onRename={ item -> renameConversationId=item.id; renameConversationText=item.title },
+                    onDelete={ item -> deletingConversationId=item.id }
+                )
+                MainTab.SETTINGS -> SettingsHomeScreen(
+                    provider=config.provider, model=config.model, endpoint=config.baseUrl,
+                    hasKey=keys.hasKey(config.provider), profilesCount=profiles.size,
+                    onOpenSettings={
+                        provider=config.provider
+                        model=config.model
+                        endpoint=config.baseUrl
+                        apiKey=""
+                        settings=true
+                    },
+                    onBuild={ showBuildManager=true }
+                )
+            }
+            NavigationBar {
+                NavigationBarItem(selected=selectedTab==MainTab.CHAT,onClick={selectedTab=MainTab.CHAT},icon={Icon(Icons.Default.Home,null)},label={Text("چت")})
+                NavigationBarItem(selected=selectedTab==MainTab.PROJECTS,onClick={selectedTab=MainTab.PROJECTS},icon={Icon(Icons.Default.FolderOpen,null)},label={Text("پروژه‌ها")})
+                NavigationBarItem(selected=selectedTab==MainTab.HISTORY,onClick={selectedTab=MainTab.HISTORY},icon={Icon(Icons.Default.History,null)},label={Text("تاریخچه")})
+                NavigationBarItem(selected=selectedTab==MainTab.SETTINGS,onClick={selectedTab=MainTab.SETTINGS},icon={Icon(Icons.Default.Settings,null)},label={Text("تنظیمات")})
             }
         }
+
     }
 
     if (showConversationList) {
@@ -477,7 +559,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
 
     if (showWorkspace) WorkspaceBrowser(workspaceDirectory) { showWorkspace = false }
     if (showHtmlPreview && !htmlPreview.isNullOrBlank()) HtmlPreviewDialog(htmlPreview, onDismiss = { showHtmlPreview = false })
-    if (showBuildManager) BuildManagerDialog(keys = keys, onDismiss = { showBuildManager = false })
+    if (showBuildManager) BuildManagerDialog(keys = keys, onDismiss = { showBuildManager = false }, onBuildStatus = { buildStatus = it }, onBuildLog = { buildLog = it }, onBuildOutput = { buildOutput = it })
 
     if (confirmClearHistory) {
         AlertDialog(
