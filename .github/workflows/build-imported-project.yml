@@ -74,13 +74,14 @@ jobs:
         env:
           PROJECT_DIR: ${{ inputs.project_dir }}
           GRADLE_TASK: ${{ inputs.gradle_task }}
+          BUILD_LOG: ${{ github.workspace }}/gradle-build.log
         run: |
-          set -euo pipefail
+          set -o pipefail
           cd "source/$PROJECT_DIR"
           if [[ -x ./gradlew ]]; then
-            ./gradlew --no-daemon "$GRADLE_TASK"
+            ./gradlew --no-daemon "$GRADLE_TASK" 2>&1 | tee "$BUILD_LOG"
           else
-            gradle --no-daemon "$GRADLE_TASK"
+            gradle --no-daemon "$GRADLE_TASK" 2>&1 | tee "$BUILD_LOG"
           fi
 
       - name: Collect APK outputs
@@ -95,6 +96,15 @@ jobs:
             exit 1
           fi
           find build-output -type f -name '*.apk' -print
+
+      - name: Upload Gradle diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: imported-project-build-log
+          path: gradle-build.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
