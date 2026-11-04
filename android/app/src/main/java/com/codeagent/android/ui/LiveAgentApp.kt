@@ -94,7 +94,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         }
     }
     val htmlPreview = lines.lastOrNull { it.role == "assistant" }?.text?.let { message ->
-        Regex("""(?is)```(?:html)?\\s*(.*?)```""").find(message)?.groupValues?.get(1)?.trim()
+        Regex("""(?is)```(?:html)?\s*(.*?)```""").find(message)?.groupValues?.get(1)?.trim()
             ?: message.takeIf { it.contains("<html", true) || it.contains("<!doctype html", true) }
     }
     fun persistHistory() {
