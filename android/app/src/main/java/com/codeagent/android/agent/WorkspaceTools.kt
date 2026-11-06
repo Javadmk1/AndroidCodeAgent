@@ -57,12 +57,12 @@ class WorkspaceTools(workspaceDirectory: File) {
     }
 
     /** Returns whether a previous version is available for a one-step undo. */
-    fun canUndo(relativePath: String): Boolean = undoFile(relativePath).isFile
+    fun canUndo(relativePath: String): Boolean = snapshotFile(relativePath).isFile
 
     /** Restores the last saved version. The snapshot is consumed after a successful restore. */
     fun undoFile(relativePath: String): Boolean {
         val target = resolve(relativePath)
-        val snapshot = undoFile(relativePath)
+        val snapshot = snapshotFile(relativePath)
         if (!snapshot.isFile) return false
         val parent = target.parentFile ?: error("Invalid parent directory")
         if (!parent.exists() && !parent.mkdirs()) error("Cannot create parent directory")
@@ -99,7 +99,7 @@ class WorkspaceTools(workspaceDirectory: File) {
         }
     }
 
-    private fun undoFile(relativePath: String): File {
+    private fun snapshotFile(relativePath: String): File {
         val key = MessageDigest.getInstance("SHA-256")
             .digest(relativePath.toByteArray(StandardCharsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
