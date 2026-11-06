@@ -59,6 +59,31 @@ class WorkspaceToolsTest {
         }
     }
 
+
+    @Test
+    fun rejectsSymlinkThatPointsOutsideWorkspace() {
+        val workspaceDir = temporaryFolder.newFolder("symlink-workspace")
+        val outside = temporaryFolder.newFile("outside.txt").apply { writeText("private") }
+        val link = java.io.File(workspaceDir, "escape.txt")
+        java.nio.file.Files.createSymbolicLink(link.toPath(), outside.toPath())
+        val workspace = WorkspaceTools(workspaceDir)
+
+        try {
+            workspace.readFile("escape.txt")
+            fail("Expected symlink escape to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("Path escapes"))
+        }
+
+        try {
+            workspace.writeFile("escape.txt", "overwritten")
+            fail("Expected symlink write to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("Path escapes"))
+        }
+        assertEquals("private", outside.readText())
+    }
+
     @Test
     fun rejectsParentTraversal() {
         val workspace = WorkspaceTools(temporaryFolder.newFolder("workspace"))
