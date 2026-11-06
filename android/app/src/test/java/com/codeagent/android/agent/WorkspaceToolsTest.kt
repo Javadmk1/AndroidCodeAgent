@@ -38,7 +38,7 @@ class WorkspaceToolsTest {
 
     @Test
     fun textDiffShowsOnlyChangedLinesWithContext() {
-        val diff = TextDiff.create("alpha\\nbeta\\ngamma", "alpha\\nBETA\\ngamma")
+        val diff = TextDiff.create("alpha\nbeta\ngamma", "alpha\nBETA\ngamma")
         assertTrue(diff.contains("-beta"))
         assertTrue(diff.contains("+BETA"))
         assertTrue(diff.contains(" alpha"))
@@ -52,7 +52,7 @@ class WorkspaceToolsTest {
     @Test
     fun textDiffRejectsOversizedInput() {
         try {
-            TextDiff.create("x\\n".repeat(401), "y")
+            TextDiff.create("x\n".repeat(401), "y")
             fail("Expected oversized diff to be rejected")
         } catch (expected: IllegalArgumentException) {
             assertTrue(expected.message.orEmpty().contains("400 lines"))
