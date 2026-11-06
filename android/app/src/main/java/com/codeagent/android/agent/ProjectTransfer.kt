@@ -40,7 +40,7 @@ class ProjectTransfer(
             fun copyDirectory(source: DocumentFile, target: File) {
                 source.listFiles().forEach { child ->
                     val name = child.name ?: return@forEach
-                    if (name.startsWith(".") || name in SKIP_DIRS) return@forEach
+                    if (name in SKIP_DIRS) return@forEach
                     val safeName = name.replace("/", "_").replace("\\", "_")
                     val destination = File(target, safeName).canonicalFile
                     require(destination.toPath().startsWith(staging.canonicalFile.toPath())) {
@@ -98,7 +98,7 @@ class ProjectTransfer(
             ZipOutputStream(raw).use { zip ->
                 workspace.walkTopDown().filter { it.isFile }.forEach { file ->
                     val relative = workspace.toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/')
-                    if (relative.split('/').any { it.startsWith(".") || it in SKIP_DIRS }) return@forEach
+                    if (relative.split('/').any { it in SKIP_DIRS }) return@forEach
                     require(file.length() <= MAX_FILE_BYTES) { "فایل $relative بیش از ۱۰ مگابایت است." }
                     total += file.length()
                     require(total <= MAX_TOTAL_BYTES) { "حجم خروجی بیش از ۱۰۰ مگابایت است." }
