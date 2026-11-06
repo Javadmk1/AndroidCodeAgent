@@ -113,6 +113,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var confirmDeleteKey by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var transferBusy by remember { mutableStateOf(false) }
+    var pendingZipUri by remember { mutableStateOf<Uri?>(null) }
     var activeJob by remember { mutableStateOf<Job?>(null) }
     var status by remember { mutableStateOf("API هنوز پیکربندی نشده است.") }
     val historyStore = remember(context) { MultiConversationStore(context) }
@@ -173,19 +174,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         }
     }
     val zipImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            transferBusy = true
-            status = "در حال بررسی و وارد کردن ZIP..."
-            try {
-                val result = transfer.importZip(uri)
-                status = "ورود ZIP موفق بود: ${result.files} فایل، ${result.bytes / 1024} کیلوبایت"
-                projects = projectStore.loadProjects()
-                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                status = "خطای ورود ZIP: ${e.message ?: "نامشخص"}"
-                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
-            } finally { transferBusy = false }
-        }
+        if (uri != null) pendingZipUri = uri
     }
     val attachmentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
@@ -647,6 +636,33 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                 status = "گفتگو حذف شد."
             }) { Text("حذف") } },
             dismissButton = { TextButton(onClick = { deletingConversationId = null }) { Text("انصراف") } }
+        )
+    }
+
+    pendingZipUri?.let { selectedZip ->
+        AlertDialog(
+            onDismissRequest = { pendingZipUri = null },
+            title = { Text("جایگزینی پروژه با ZIP؟") },
+            text = { Text("محتوای پروژهٔ فعال «$activeProjectName» با فایل ZIP انتخاب‌شده جایگزین می‌شود. ابتدا آرشیو در فضای موقت بررسی می‌شود؛ اگر استخراج ناموفق باشد، پروژهٔ قبلی حفظ می‌شود. فقط فایل ZIP مورد اعتماد خودت را انتخاب کن.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingZipUri = null
+                    scope.launch {
+                        transferBusy = true
+                        status = "در حال بررسی و وارد کردن ZIP..."
+                        try {
+                            val result = transfer.importZip(selectedZip)
+                            status = "ورود ZIP موفق بود: ${result.files} فایل، ${result.bytes / 1024} کیلوبایت"
+                            projects = projectStore.loadProjects()
+                            Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                        } catch (e: Exception) {
+                            status = "خطای ورود ZIP: ${e.message ?: "نامشخص"}"
+                            Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                        } finally { transferBusy = false }
+                    }
+                }) { Text("جایگزینی و وارد کردن") }
+            },
+            dismissButton = { TextButton(onClick = { pendingZipUri = null }) { Text("انصراف") } }
         )
     }
 
