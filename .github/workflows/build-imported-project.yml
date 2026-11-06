@@ -121,7 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build-output
-          find source -type f -path '*/build/outputs/apk/*/*.apk' -not -path '*/build/outputs/apk/androidTest/*' -exec cp --parents {} build-output/ \\;
+          find source -type f -path '*/build/outputs/apk/*/*.apk' -not -path '*/build/outputs/apk/androidTest/*' -exec cp --parents -- {} build-output/ \;
           find build-output -type f -name '*.apk' -print -quit | grep -q . || { echo "No APK was produced"; exit 1; }
           find build-output -type f -name '*.apk' -exec sha256sum {} \; > build-output/SHA256SUMS
 
