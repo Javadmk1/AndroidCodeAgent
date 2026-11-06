@@ -72,7 +72,7 @@ Important limits:
 
 ## Security and product boundaries
 
-- API keys are not included in project exports or build uploads.
+- API keys are stored separately from project files and are not included in build uploads. Project ZIP exports also omit common local credential files such as `.env*`, `local.properties`, signing keystores/certificates, private-key files, `.npmrc`, `.pypirc`, `.netrc`, and files named `credentials*` or `secrets*`. This is a filename-based safety filter, not a guarantee that secrets pasted into ordinary source files will be detected.
 - File tools are confined to the app-owned project directory.
 - Model-requested file writes require explicit user approval.
 - Arbitrary shell execution is intentionally not exposed.
