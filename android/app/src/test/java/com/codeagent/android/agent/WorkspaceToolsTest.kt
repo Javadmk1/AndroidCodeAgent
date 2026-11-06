@@ -35,6 +35,30 @@ class WorkspaceToolsTest {
         assertTrue(!workspace.undoFile("src/Main.kt"))
     }
 
+
+    @Test
+    fun textDiffShowsOnlyChangedLinesWithContext() {
+        val diff = TextDiff.create("alpha\\nbeta\\ngamma", "alpha\\nBETA\\ngamma")
+        assertTrue(diff.contains("-beta"))
+        assertTrue(diff.contains("+BETA"))
+        assertTrue(diff.contains(" alpha"))
+    }
+
+    @Test
+    fun textDiffReportsIdenticalContent() {
+        assertEquals("No changes.", TextDiff.create("same", "same"))
+    }
+
+    @Test
+    fun textDiffRejectsOversizedInput() {
+        try {
+            TextDiff.create("x\\n".repeat(401), "y")
+            fail("Expected oversized diff to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("400 lines"))
+        }
+    }
+
     @Test
     fun rejectsParentTraversal() {
         val workspace = WorkspaceTools(temporaryFolder.newFolder("workspace"))
