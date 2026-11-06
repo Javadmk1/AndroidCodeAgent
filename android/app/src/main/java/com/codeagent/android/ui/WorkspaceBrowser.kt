@@ -79,6 +79,24 @@ fun WorkspaceBrowser(workspaceDirectory: File, onDismiss: () -> Unit) {
                         }
                     }
                     Text(selectedPath ?: "", style = MaterialTheme.typography.labelSmall)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(
+                            enabled = selectedPath?.let { tools.canUndo(it) } == true,
+                            onClick = {
+                                try {
+                                    val path = selectedPath ?: return@TextButton
+                                    if (tools.undoFile(path)) {
+                                        editorText = tools.readFile(path)
+                                        tabDrafts[path] = editorText
+                                        refresh++
+                                        error = "آخرین نسخه ذخیره‌شده بازیابی شد."
+                                    }
+                                } catch (e: Exception) {
+                                    error = e.message ?: "بازگردانی ناموفق بود."
+                                }
+                            }
+                        ) { Text("بازگردانی نسخه قبلی") }
+                    }
                     OutlinedTextField(
                         value = editorText,
                         onValueChange = { editorText = it },
