@@ -7,8 +7,11 @@ import com.codeagent.android.agent.ProjectStore
 import com.codeagent.android.agent.BuildProjectService
 import com.codeagent.android.agent.ToolRegistry
 import com.codeagent.android.agent.WorkspaceTools
+import com.codeagent.android.agent.TextDiff
 import com.codeagent.android.llm.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -134,11 +137,12 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     val activeProject = projects.firstOrNull { it.id == activeProjectId }
     val activeProjectName = activeProject?.name ?: "پروژه من"
     val workspaceDirectory = remember(context, activeProjectId) { projectStore.directory(activeProjectId) }
+    val workspaceTools = remember(workspaceDirectory) { WorkspaceTools(workspaceDirectory) }
     val transfer = remember(context, activeProjectId) { ProjectTransfer(context, workspaceDirectory) }
     val buildService = remember(context, keys) { BuildProjectService(context, keys) }
-    val runtime = remember(workspaceDirectory, buildService) {
+    val runtime = remember(workspaceTools, buildService) {
         AgentRuntime(ToolRegistry(
-            WorkspaceTools(workspaceDirectory),
+            workspaceTools,
             buildProject = { task, report -> buildService.build(workspaceDirectory, task, report) }
         ))
     }
@@ -351,7 +355,10 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                         approveWrite = { path, content ->
                                                             val gate = CompletableDeferred<Boolean>()
                                                             approvalPath = path
-                                                            approvalPreview = content.take(800)
+                                                            val currentContent = runCatching { workspaceTools.readFile(path) }.getOrDefault("")
+                                                            approvalPreview = runCatching { TextDiff.create(currentContent, content) }
+                                                                .getOrElse { "نمایش تفاوت ممکن نشد: ${it.message ?: "خطای نامشخص"}\n\nمحتوای پیشنهادی:\n$content" }
+                                                                .take(12000)
                                                             approvalDecision = gate
                                                             try { gate.await() } finally {
                                                                 approvalPath = null
@@ -715,7 +722,26 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         AlertDialog(
             onDismissRequest = { approvalDecision?.complete(false) },
             title = { Text("اجازهٔ تغییر فایل؟") },
-            text = { Text("مسیر: $approvalPath\\n\\nپیش‌نمایش محتوا (حداکثر ۸۰۰ نویسه):\\n$approvalPreview\\n\\nاگر مسیر و محتوا را بررسی نکرده‌ای، رد کن.") },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("مسیر فایل: $approvalPath", style = MaterialTheme.typography.titleSmall)
+                    Text("تغییرات دقیق پیشنهادی (نسخه فعلی در برابر نسخه جدید):", style = MaterialTheme.typography.bodySmall)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            approvalPreview,
+                            Modifier.fillMaxWidth().padding(10.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Text("فقط در صورت درست بودن مسیر و تغییرات، نوشتن را تأیید کن.", style = MaterialTheme.typography.bodySmall)
+                }
+            },
             confirmButton = { TextButton(onClick = { approvalDecision?.complete(true) }) { Text("تأیید نوشتن") } },
             dismissButton = { TextButton(onClick = { approvalDecision?.complete(false) }) { Text("رد") } }
         )
