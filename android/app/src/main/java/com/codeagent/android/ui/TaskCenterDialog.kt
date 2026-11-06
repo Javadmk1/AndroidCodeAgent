@@ -59,7 +59,7 @@ fun TaskCenterDialog(
                                         when {
                                             item.kind == WorkKind.PLAN_STEP && item.completed -> "مرحله تکمیل شده"
                                             item.kind == WorkKind.PLAN_STEP -> "مرحله برنامه"
-                                            else -> "در صف اجرا · برای انتقال به چت لمس کن"
+                                            else -> "در صف · برای انتقال به چت لمس کن؛ تا حذف دستی باقی می‌ماند"
                                         },
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.secondary
