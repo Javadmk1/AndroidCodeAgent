@@ -10,7 +10,7 @@ A native Android coding assistant built with Kotlin and Jetpack Compose. It conn
 - Multi-project workspaces with create, switch, rename and delete.
 - Project import/export through Android's Storage Access Framework.
 - File browser and multi-tab text editor with explicit save approval.
-- Agent tools for listing, reading, searching and approval-gated writing.
+- Agent tools for listing, reading, searching, generating bounded file diffs, and approval-gated writing. The approval dialog displays the exact proposed diff before a write.
 - Bounded local chat history and cancellable agent requests.
 - GitHub Actions workflows for building this app and building public GitHub Android projects.
 
