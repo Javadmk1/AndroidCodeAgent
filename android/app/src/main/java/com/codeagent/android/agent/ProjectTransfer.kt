@@ -183,6 +183,7 @@ class ProjectTransfer(
                     !ProjectExportRules.isSensitivePath(relative) &&
                     !java.nio.file.Files.isSymbolicLink(file.toPath())
             }
+            .take(MAX_FILES + 1)
             .toList()
 
         require(files.size <= MAX_FILES) { "تعداد فایل‌های خروجی بیش از حد مجاز است." }
