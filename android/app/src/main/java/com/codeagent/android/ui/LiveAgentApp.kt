@@ -735,8 +735,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         onToggle = { item, checked -> workQueueStore.setCompleted(item.id, checked); workItems = workQueueStore.list(activeProjectId) },
         onRemove = { item -> workQueueStore.remove(item.id); workItems = workQueueStore.list(activeProjectId) },
         onUsePrompt = { item ->
-            val queued = workQueueStore.consumePrompt(item.id)
-            if (queued != null) { prompt = queued; workItems = workQueueStore.list(activeProjectId); showTaskCenter = false; selectedTab = MainTab.CHAT; status = "درخواست به کادر چت منتقل شد؛ برای اجرا ارسالش کن." }
+            val queued = workQueueStore.readPrompt(item.id)
+            if (queued != null) { prompt = queued; showTaskCenter = false; selectedTab = MainTab.CHAT; status = "درخواست به کادر چت منتقل شد و تا حذف دستی در صف باقی می‌ماند." }
         },
         onDismiss = { showTaskCenter = false }
     )
