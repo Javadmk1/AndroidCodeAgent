@@ -38,6 +38,14 @@ class ToolRegistry(
                 }
                 JSONObject().put("ok", true).put("matches", array)
             }
+            "diff_file" -> {
+                val path = arguments.getString("path")
+                val proposed = arguments.getString("content")
+                val current = runCatching { workspace.readFile(path) }.getOrDefault("")
+                JSONObject().put("ok", true).put("path", path)
+                    .put("diff", TextDiff.create(current, proposed))
+                    .put("note", "Review this diff before requesting write_file approval.")
+            }
             "build_project" -> {
                 val task = arguments.optString("task", "assembleDebug")
                 if (task !in ALLOWED_BUILD_TASKS) {
