@@ -2,6 +2,7 @@ package com.codeagent.android.agent
 
 import java.io.File
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 
 /**
  * Minimal local workspace toolset. All paths are relative to the app-owned workspace.
@@ -39,8 +40,70 @@ class WorkspaceTools(workspaceDirectory: File) {
         val file = resolve(relativePath)
         val parent = file.parentFile ?: error("Invalid parent directory")
         if (!parent.exists() && !parent.mkdirs()) error("Cannot create parent directory")
-        if (file.exists()) require(file.isFile) { "Target is not a file" }
-        file.writeText(content, StandardCharsets.UTF_8)
+        if (file.exists()) {
+            require(file.isFile) { "Target is not a file" }
+            saveUndoSnapshot(relativePath, file)
+        }
+        val temporary = File(parent, ".${file.name}.codeagent-tmp")
+        temporary.writeText(content, StandardCharsets.UTF_8)
+        if (file.exists() && !file.delete()) {
+            temporary.delete()
+            error("Cannot replace existing file")
+        }
+        if (!temporary.renameTo(file)) {
+            temporary.delete()
+            error("Cannot finish saving file")
+        }
+    }
+
+    /** Returns whether a previous version is available for a one-step undo. */
+    fun canUndo(relativePath: String): Boolean = undoFile(relativePath).isFile
+
+    /** Restores the last saved version. The snapshot is consumed after a successful restore. */
+    fun undoFile(relativePath: String): Boolean {
+        val target = resolve(relativePath)
+        val snapshot = undoFile(relativePath)
+        if (!snapshot.isFile) return false
+        val parent = target.parentFile ?: error("Invalid parent directory")
+        if (!parent.exists() && !parent.mkdirs()) error("Cannot create parent directory")
+        val temporary = File(parent, ".${target.name}.codeagent-undo")
+        snapshot.copyTo(temporary, overwrite = true)
+        if (target.exists() && !target.delete()) {
+            temporary.delete()
+            error("Cannot replace current file")
+        }
+        if (!temporary.renameTo(target)) {
+            temporary.delete()
+            error("Cannot restore previous file")
+        }
+        snapshot.delete()
+        return true
+    }
+
+    private fun saveUndoSnapshot(relativePath: String, source: File) {
+        val history = File(root, ".codeagent-history")
+        if (!history.exists() && !history.mkdirs()) error("Cannot create undo history")
+        val key = MessageDigest.getInstance("SHA-256")
+            .digest(relativePath.toByteArray(StandardCharsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        val snapshot = File(history, "$key.bak")
+        val temporary = File(history, "$key.tmp")
+        source.copyTo(temporary, overwrite = true)
+        if (snapshot.exists() && !snapshot.delete()) {
+            temporary.delete()
+            error("Cannot update undo history")
+        }
+        if (!temporary.renameTo(snapshot)) {
+            temporary.delete()
+            error("Cannot save undo history")
+        }
+    }
+
+    private fun undoFile(relativePath: String): File {
+        val key = MessageDigest.getInstance("SHA-256")
+            .digest(relativePath.toByteArray(StandardCharsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return File(File(root, ".codeagent-history"), "$key.bak")
     }
 
     fun searchInFiles(query: String, relativePath: String = ""): List<SearchMatch> {
