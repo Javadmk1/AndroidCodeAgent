@@ -170,25 +170,42 @@ class ProjectTransfer(
 
     suspend fun exportZip(destination: Uri): TransferResult = withContext(Dispatchers.IO) {
         require(workspace.isDirectory) { "فضای پروژه وجود ندارد." }
-        var count = 0
+        val root = workspace.canonicalFile
+        val files = root.walkTopDown()
+            .filter { it.isFile }
+            .map { file ->
+                val relative = root.toPath().relativize(file.toPath()).toString()
+                    .replace(File.separatorChar, '/')
+                file to relative
+            }
+            .filter { (file, relative) ->
+                relative.split('/').none { it in SKIP_DIRS } &&
+                    !ProjectExportRules.isSensitivePath(relative) &&
+                    !java.nio.file.Files.isSymbolicLink(file.toPath())
+            }
+            .toList()
+
+        require(files.size <= MAX_FILES) { "تعداد فایل‌های خروجی بیش از حد مجاز است." }
         var total = 0L
+        files.forEach { (file, relative) ->
+            require(file.canonicalFile.toPath().startsWith(root.toPath())) {
+                "مسیر فایل $relative از محدوده پروژه خارج می‌شود."
+            }
+            require(file.length() <= MAX_FILE_BYTES) { "فایل $relative بیش از ۱۰ مگابایت است." }
+            total += file.length()
+            require(total <= MAX_TOTAL_BYTES) { "حجم خروجی بیش از ۱۰۰ مگابایت است." }
+        }
+
         context.contentResolver.openOutputStream(destination, "w")?.use { raw ->
             ZipOutputStream(raw).use { zip ->
-                workspace.walkTopDown().filter { it.isFile }.forEach { file ->
-                    val relative = workspace.toPath().relativize(file.toPath()).toString().replace(File.separatorChar, '/')
-                    if (relative.split('/').any { it in SKIP_DIRS }) return@forEach
-                    require(file.length() <= MAX_FILE_BYTES) { "فایل $relative بیش از ۱۰ مگابایت است." }
-                    total += file.length()
-                    require(total <= MAX_TOTAL_BYTES) { "حجم خروجی بیش از ۱۰۰ مگابایت است." }
+                files.forEach { (file, relative) ->
                     zip.putNextEntry(ZipEntry(relative))
                     file.inputStream().use { it.copyTo(zip) }
                     zip.closeEntry()
-                    count++
-                    require(count <= MAX_FILES) { "تعداد فایل‌ها بیش از حد مجاز است." }
                 }
             }
         } ?: error("ذخیرهٔ فایل خروجی ناموفق بود.")
-        TransferResult(count, total)
+        TransferResult(files.size, total)
     }
 
     private companion object {
