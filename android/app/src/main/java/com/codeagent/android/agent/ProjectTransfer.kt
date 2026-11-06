@@ -107,10 +107,12 @@ class ProjectTransfer(
             java.util.zip.ZipInputStream(input.buffered()).use { zip ->
                 while (true) {
                     val entry = zip.nextEntry ?: break
-                    val rawName = entry.name.replace('\\\\', '/')
+                    val rawName = entry.name.replace('\\', '/')
                     require(rawName.isNotBlank() && !rawName.startsWith("/") &&
                         !rawName.matches(Regex("^[A-Za-z]:.*"))) { "مسیر نامعتبر در ZIP: $rawName" }
-                    val segments = rawName.split('/')
+                    val normalizedRaw = rawName.trimEnd('/')
+                    require(normalizedRaw.isNotBlank()) { "نام فایل ZIP نامعتبر است." }
+                    val segments = normalizedRaw.split('/')
                     require(segments.none { it.isBlank() || it == "." || it == ".." }) {
                         "مسیر ناامن در ZIP: $rawName"
                     }
