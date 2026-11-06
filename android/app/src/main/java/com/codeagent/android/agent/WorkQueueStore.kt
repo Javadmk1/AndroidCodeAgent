@@ -87,12 +87,9 @@ class WorkQueueStore(context: Context) {
         save(WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]").filterNot { it.id == id })
     }
 
-    @Synchronized fun consumePrompt(id: String): String? {
-        val items = WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]")
-        val item = items.firstOrNull { it.id == id && it.kind == WorkKind.QUEUED_PROMPT } ?: return null
-        save(items.filterNot { it.id == id })
-        return item.prompt
-    }
+    @Synchronized fun readPrompt(id: String): String? =
+        WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]")
+            .firstOrNull { it.id == id && it.kind == WorkKind.QUEUED_PROMPT }?.prompt
 
     private fun append(item: WorkItem) {
         val items = WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]")
