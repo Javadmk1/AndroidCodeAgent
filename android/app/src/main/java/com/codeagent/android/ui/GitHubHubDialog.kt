@@ -8,6 +8,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.codeagent.android.SecureKeyStore
@@ -18,6 +19,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun GitHubHubDialog(keys: SecureKeyStore, onDismiss: () -> Unit, onStatus: (String) -> Unit) {
     val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
     val api = remember { GitHubApiClient() }
     var repository by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
@@ -68,7 +70,7 @@ fun GitHubHubDialog(keys: SecureKeyStore, onDismiss: () -> Unit, onStatus: (Stri
                 }
                 Text("Pull Requestهای باز: " + pullRequests.size, style = MaterialTheme.typography.titleSmall)
                 pullRequests.forEach { pr ->
-                    TextButton(onClick = { onStatus("PR #" + pr.number + ": " + pr.url) }) {
+                    TextButton(onClick = { uriHandler.openUri(pr.url); onStatus("Pull Request #" + pr.number + " باز شد.") }) {
                         Text("#" + pr.number + " · " + pr.title + " (" + pr.head + " → " + pr.base + ")")
                     }
                 }
