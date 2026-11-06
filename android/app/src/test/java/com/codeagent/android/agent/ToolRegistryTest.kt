@@ -50,6 +50,42 @@ class ToolRegistryTest {
     }
 
     @Test
+    fun undoRequiresApprovalAndRestoresPreviousVersion() = runBlocking {
+        val workspaceDir = newWorkspaceDir()
+        try {
+            val workspace = WorkspaceTools(workspaceDir)
+            workspace.writeFile("src/Main.kt", "old version")
+            workspace.writeFile("src/Main.kt", "new version")
+            val registry = ToolRegistry(workspace)
+
+            val denied = registry.execute(
+                "undo_file",
+                JSONObject().put("path", "src/Main.kt"),
+                approveWrite = { path, proposed ->
+                    assertEquals("src/Main.kt", path)
+                    assertEquals("old version", proposed)
+                    false
+                }
+            )
+            assertFalse(denied.getBoolean("ok"))
+            assertEquals("new version", workspace.readFile("src/Main.kt"))
+
+            val approved = registry.execute(
+                "undo_file",
+                JSONObject().put("path", "src/Main.kt"),
+                approveWrite = { path, proposed ->
+                    path == "src/Main.kt" && proposed == "old version"
+                }
+            )
+            assertTrue(approved.getBoolean("ok"))
+            assertEquals("old version", workspace.readFile("src/Main.kt"))
+            assertFalse(workspace.canUndo("src/Main.kt"))
+        } finally {
+            workspaceDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun unknownBuildTaskNeverRunsEvenWhenApproved() = runBlocking {
         val workspaceDir = newWorkspaceDir()
         try {
