@@ -56,6 +56,15 @@ class WorkspaceTools(workspaceDirectory: File) {
         }
     }
 
+    /** Reads the last saved version for an approval preview, or null when no snapshot exists. */
+    fun readUndoFile(relativePath: String): String? {
+        resolve(relativePath)
+        val snapshot = snapshotFile(relativePath)
+        if (!snapshot.isFile) return null
+        require(snapshot.length() <= MAX_FILE_BYTES) { "Undo snapshot exceeds 1 MB limit" }
+        return snapshot.readText(StandardCharsets.UTF_8)
+    }
+
     /** Returns whether a previous version is available for a one-step undo. */
     fun canUndo(relativePath: String): Boolean = snapshotFile(relativePath).isFile
 
