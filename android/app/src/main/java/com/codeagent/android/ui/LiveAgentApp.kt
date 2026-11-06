@@ -113,6 +113,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var showHtmlPreview by remember { mutableStateOf(false) }
     var showBuildManager by remember { mutableStateOf(false) }
     var showTaskCenter by remember { mutableStateOf(false) }
+    var showGitHubHub by remember { mutableStateOf(false) }
     var showParallelReviewReport by remember { mutableStateOf(false) }
     var parallelReviewBusy by remember { mutableStateOf(false) }
     var parallelReviewResults by remember { mutableStateOf<List<ParallelReviewResult>>(emptyList()) }
@@ -262,6 +263,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                             DropdownMenuItem(text = { Text("گفتگوها") }, leadingIcon = { Icon(Icons.Default.Forum, null) }, onClick = { menuExpanded = false; showConversationList = true })
                             DropdownMenuItem(text = { Text("صف کارها و برنامه پروژه") }, leadingIcon = { Icon(Icons.Default.History, null) }, onClick = { menuExpanded = false; workItems = workQueueStore.list(activeProjectId); showTaskCenter = true })
+                            DropdownMenuItem(text = { Text("اتصال GitHub و مدیریت PR") }, leadingIcon = { Icon(Icons.Default.Code, null) }, onClick = { menuExpanded = false; showGitHubHub = true })
                             DropdownMenuItem(text = { Text(if (parallelReviewBusy) "بررسی موازی در حال اجرا..." else "بررسی موازی با ۳ ایجنت") }, leadingIcon = { Icon(Icons.Default.Code, null) }, enabled = !parallelReviewBusy && !busy, onClick = {
                                 menuExpanded = false
                                 val secret = keys.read(config.provider)
@@ -705,6 +707,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             dismissButton = { TextButton(onClick = { pendingZipUri = null }) { Text("انصراف") } }
         )
     }
+
+    if (showGitHubHub) GitHubHubDialog(keys = keys, onDismiss = { showGitHubHub = false }, onStatus = { status = it })
 
     if (showTaskCenter) TaskCenterDialog(
         items = workItems,
