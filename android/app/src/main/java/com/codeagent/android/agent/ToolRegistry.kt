@@ -10,6 +10,12 @@ class ToolRegistry(
     private val workspace: WorkspaceTools,
     private val buildProject: suspend (String, suspend (String) -> Unit) -> JSONObject = { _, _ ->
         JSONObject().put("ok", false).put("error", "Build service is not configured")
+    },
+    private val createPlanStep: suspend (String, String) -> JSONObject = { _, _ ->
+        JSONObject().put("ok", false).put("error", "Project plan storage is not configured")
+    },
+    private val queuePrompt: suspend (String) -> JSONObject = { _ ->
+        JSONObject().put("ok", false).put("error", "Task queue is not configured")
     }
 ) {
     suspend fun execute(
@@ -46,6 +52,11 @@ class ToolRegistry(
                     .put("diff", TextDiff.create(current, proposed))
                     .put("note", "Review this diff before requesting write_file approval.")
             }
+            "create_plan_step" -> createPlanStep(
+                arguments.getString("title"),
+                arguments.optString("details", "")
+            )
+            "queue_request" -> queuePrompt(arguments.getString("prompt"))
             "build_project" -> {
                 val task = arguments.optString("task", "assembleDebug")
                 if (task !in ALLOWED_BUILD_TASKS) {
@@ -82,7 +93,7 @@ class ToolRegistry(
         }
     }
 
-    fun toolNames(): List<String> = listOf("list_files", "read_file", "search_in_files", "diff_file", "undo_file", "write_file", "build_project")
+    fun toolNames(): List<String> = listOf("list_files", "read_file", "search_in_files", "diff_file", "undo_file", "write_file", "create_plan_step", "queue_request", "build_project")
 
     private companion object {
         val ALLOWED_BUILD_TASKS = setOf("tasks", "assembleDebug", "testDebugUnitTest", "lintDebug", "check", "clean")
