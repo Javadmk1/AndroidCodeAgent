@@ -56,6 +56,19 @@ class ToolRegistry(
                     buildProject(task, onActivity)
                 }
             }
+            "undo_file" -> {
+                val path = arguments.getString("path")
+                val previous = workspace.readUndoFile(path)
+                if (previous == null) {
+                    JSONObject().put("ok", false).put("error", "No previous version is available for this file")
+                } else if (!approveWrite(path, previous)) {
+                    JSONObject().put("ok", false).put("error", "User denied file restore")
+                } else {
+                    val restored = workspace.undoFile(path)
+                    JSONObject().put("ok", restored).put("path", path)
+                        .put("message", if (restored) "Previous file version restored" else "Undo snapshot is no longer available")
+                }
+            }
             "write_file" -> {
                 val path = arguments.getString("path")
                 if (!approveWrite(path, arguments.getString("content"))) {
@@ -69,7 +82,7 @@ class ToolRegistry(
         }
     }
 
-    fun toolNames(): List<String> = listOf("list_files", "read_file", "search_in_files", "diff_file", "write_file", "build_project")
+    fun toolNames(): List<String> = listOf("list_files", "read_file", "search_in_files", "diff_file", "undo_file", "write_file", "build_project")
 
     private companion object {
         val ALLOWED_BUILD_TASKS = setOf("tasks", "assembleDebug", "testDebugUnitTest", "lintDebug", "check", "clean")
