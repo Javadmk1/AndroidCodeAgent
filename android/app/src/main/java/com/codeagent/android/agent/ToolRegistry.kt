@@ -69,7 +69,7 @@ class ToolRegistry(
         }
     }
 
-    fun toolNames(): List<String> = listOf("list_files", "read_file", "search_in_files", "write_file", "build_project")
+    fun toolNames(): List<String> = listOf("list_files", "read_file", "search_in_files", "diff_file", "write_file", "build_project")
 
     private companion object {
         val ALLOWED_BUILD_TASKS = setOf("tasks", "assembleDebug", "testDebugUnitTest", "lintDebug", "check", "clean")
