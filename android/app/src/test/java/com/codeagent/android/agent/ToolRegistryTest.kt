@@ -86,6 +86,42 @@ class ToolRegistryTest {
     }
 
     @Test
+    fun agentCanCreatePlanStepsAndQueueExplicitFollowUpRequests() = runBlocking {
+        val workspaceDir = newWorkspaceDir()
+        try {
+            val plan = mutableListOf<Pair<String, String>>()
+            val queued = mutableListOf<String>()
+            val registry = ToolRegistry(
+                WorkspaceTools(workspaceDir),
+                createPlanStep = { title, details ->
+                    plan += title to details
+                    JSONObject().put("ok", true).put("title", title)
+                },
+                queuePrompt = { prompt ->
+                    queued += prompt
+                    JSONObject().put("ok", true)
+                }
+            )
+            val planResult = registry.execute(
+                "create_plan_step",
+                JSONObject().put("title", "Add regression test").put("details", "Verify retry behavior"),
+                approveWrite = { _, _ -> false }
+            )
+            val queueResult = registry.execute(
+                "queue_request",
+                JSONObject().put("prompt", "Review the next module"),
+                approveWrite = { _, _ -> false }
+            )
+            assertTrue(planResult.getBoolean("ok"))
+            assertTrue(queueResult.getBoolean("ok"))
+            assertEquals(listOf("Add regression test" to "Verify retry behavior"), plan)
+            assertEquals(listOf("Review the next module"), queued)
+        } finally {
+            workspaceDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun unknownBuildTaskNeverRunsEvenWhenApproved() = runBlocking {
         val workspaceDir = newWorkspaceDir()
         try {
