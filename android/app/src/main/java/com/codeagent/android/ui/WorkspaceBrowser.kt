@@ -24,7 +24,7 @@ fun WorkspaceBrowser(workspaceDirectory: File, onDismiss: () -> Unit) {
     var newPath by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    val files = remember(refresh) {
+    val files = remember(workspaceDirectory, refresh) {
         workspaceDirectory.walkTopDown()
             .filter { it.isFile && it.length() <= 1_048_576L }
             .take(500)
