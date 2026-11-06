@@ -29,6 +29,7 @@ fun ProjectHomeScreen(
     onRenameProject: (ProjectRecord, String) -> Unit,
     onDeleteProject: (ProjectRecord) -> Unit,
     onImport: () -> Unit,
+    onImportZip: () -> Unit,
     onBrowse: () -> Unit,
     onBuild: () -> Unit,
     onExport: () -> Unit
@@ -71,7 +72,8 @@ fun ProjectHomeScreen(
                         }
                         if (project.id == activeProjectId) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = onImport, modifier = Modifier.weight(1f)) { Text("وارد کردن") }
+                                OutlinedButton(onClick = onImport, modifier = Modifier.weight(1f)) { Text("پوشه") }
+                                OutlinedButton(onClick = onImportZip, modifier = Modifier.weight(1f)) { Text("فایل ZIP") }
                                 OutlinedButton(onClick = onBrowse, modifier = Modifier.weight(1f)) { Text("فایل‌ها") }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
