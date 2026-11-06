@@ -72,7 +72,8 @@ class GitHubApiClient {
 
     private fun safeRepo(value: String): String {
         val parts = value.trim().split("/")
-        require(parts.size == 2 && parts.all { it.matches(Regex("[A-Za-z0-9_.-]{1,100}")) }) {
+        require(parts.size == 2 && parts.none { it == "." || it == ".." } &&
+            parts.all { it.matches(Regex("[A-Za-z0-9_.-]{1,100}")) }) {
             "نام مخزن باید به شکل owner/repository باشد."
         }
         return parts.joinToString("/")
