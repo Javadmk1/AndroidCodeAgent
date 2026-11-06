@@ -191,6 +191,6 @@ class ProjectTransfer(
         const val MAX_FILES = 5_000
         const val MAX_FILE_BYTES = 10L * 1024 * 1024
         const val MAX_TOTAL_BYTES = 100L * 1024 * 1024
-        val SKIP_DIRS = setOf(".git", ".gradle", "build", ".idea", ".kotlin")
+        val SKIP_DIRS = setOf(".git", ".gradle", "build", ".idea", ".kotlin", ".codeagent-history")
     }
 }
