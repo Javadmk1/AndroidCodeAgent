@@ -290,6 +290,8 @@ class AgentRuntime(
             JSONObject("""{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string"}},"required":["query"]}""")),
         Triple("diff_file", "Compare proposed file content with the current workspace version. Use this before requesting an approved write.",
             JSONObject("""{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}""")),
+        Triple("undo_file", "Restore the last saved version of a file. Show the exact reverse diff and require user approval before restoring.",
+            JSONObject("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""")),
         Triple("write_file", "Create or replace a UTF-8 text file. User approval is required.",
             JSONObject("""{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}""")),
         Triple("build_project", "Run an approved Gradle task in the isolated Android SDK build service. Use assembleDebug to produce an APK. User approval is required.",
