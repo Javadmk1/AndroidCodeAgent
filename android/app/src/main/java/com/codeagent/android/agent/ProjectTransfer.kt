@@ -35,21 +35,26 @@ class ProjectTransfer(
         if (!staging.mkdirs()) error("ساخت فضای موقت پروژه ناموفق بود.")
 
         var count = 0
+        var entryCount = 0
         var total = 0L
+        val visitedDirectories = HashSet<String>()
         try {
-            fun copyDirectory(source: DocumentFile, target: File) {
+            fun copyDirectory(source: DocumentFile, target: File, depth: Int) {
+                ProjectImportRules.requireDepth(depth)
+                require(visitedDirectories.add(source.uri.toString())) { "ساختار پوشه‌ها دارای ارجاع تکراری است." }
                 source.listFiles().forEach { child ->
                     val name = child.name ?: return@forEach
                     if (name in SKIP_DIRS) return@forEach
-                    val safeName = name.replace("/", "_").replace("\\", "_")
-                    val destination = File(target, safeName).canonicalFile
+                    ProjectImportRules.requireSafeName(name)
+                    entryCount++
+                    require(entryCount <= MAX_FILES) { "تعداد ورودی‌های پروژه بیش از حد مجاز است." }
+                    val destination = File(target, name).canonicalFile
                     require(destination.toPath().startsWith(staging.canonicalFile.toPath())) {
                         "مسیر فایل نامعتبر است."
                     }
                     if (child.isDirectory) {
-                        require(count < MAX_FILES) { "تعداد فایل‌ها بیش از حد مجاز است." }
                         if (!destination.exists() && !destination.mkdirs()) error("ساخت پوشه ناموفق بود.")
-                        copyDirectory(child, destination)
+                        copyDirectory(child, destination, depth + 1)
                     } else if (child.isFile) {
                         val size = child.length()
                         require(size in 0..MAX_FILE_BYTES) { "فایل $name بیش از ۱۰ مگابایت است." }
@@ -68,12 +73,11 @@ class ProjectTransfer(
                             }
                         } ?: error("خواندن فایل $name ناموفق بود.")
                         count++
-                        require(count <= MAX_FILES) { "تعداد فایل‌ها بیش از حد مجاز است." }
                     }
                 }
             }
 
-            copyDirectory(root, staging)
+            copyDirectory(root, staging, 0)
             if (workspace.exists() && !workspace.renameTo(backup)) {
                 error("انتقال پروژهٔ قبلی به نسخهٔ پشتیبان ناموفق بود.")
             }
