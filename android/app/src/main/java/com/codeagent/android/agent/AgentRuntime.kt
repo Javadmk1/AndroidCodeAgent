@@ -2,6 +2,9 @@ package com.codeagent.android.agent
 
 import com.codeagent.android.llm.ProviderConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -146,6 +149,9 @@ class AgentRuntime(
         }
         val endpoint = config.baseUrl.trimEnd('/') + if (anthropic) "/messages" else "/chat/completions"
         val connection = URL(endpoint).openConnection() as HttpURLConnection
+        val cancellationHandle = currentCoroutineContext()[Job]?.let { job ->
+            disconnectOnCancellation(connection, job)
+        }
         try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000
@@ -164,7 +170,13 @@ class AgentRuntime(
                 error("API error $code: ${errorText.take(1000)}")
             }
             return if (anthropic) readAnthropicStream(connection, onText) else readOpenAiStream(connection, onText)
+        } catch (error: Exception) {
+            // A disconnect triggered by cancellation can surface as an IOException. Preserve
+            // cancellation semantics instead of reporting it as an ordinary provider failure.
+            currentCoroutineContext().ensureActive()
+            throw error
         } finally {
+            cancellationHandle?.dispose()
             connection.disconnect()
         }
     }
