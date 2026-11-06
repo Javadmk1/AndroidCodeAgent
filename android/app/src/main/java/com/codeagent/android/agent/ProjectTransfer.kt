@@ -100,6 +100,7 @@ class ProjectTransfer(
         backup.deleteRecursively()
         check(staging.mkdirs()) { "ساخت فضای موقت پروژه ناموفق بود." }
         var count = 0
+        var entryCount = 0
         var total = 0L
         val seen = HashSet<String>()
         try {
@@ -107,6 +108,8 @@ class ProjectTransfer(
             java.util.zip.ZipInputStream(input.buffered()).use { zip ->
                 while (true) {
                     val entry = zip.nextEntry ?: break
+                    entryCount++
+                    require(entryCount <= MAX_FILES) { "تعداد ورودی‌های ZIP بیش از حد مجاز است." }
                     val rawName = entry.name.replace('\\', '/')
                     require(rawName.isNotBlank() && !rawName.startsWith("/") &&
                         !rawName.matches(Regex("^[A-Za-z]:.*"))) { "مسیر نامعتبر در ZIP: $rawName" }
