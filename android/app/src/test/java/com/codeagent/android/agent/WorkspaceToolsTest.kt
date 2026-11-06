@@ -21,6 +21,20 @@ class WorkspaceToolsTest {
         assertEquals("src/Main.kt", workspace.searchInFiles("hello").single().path)
     }
 
+
+    @Test
+    fun keepsOnePreviousVersionAndRestoresItOnce() {
+        val workspace = WorkspaceTools(temporaryFolder.newFolder("undo-workspace"))
+        workspace.writeFile("src/Main.kt", "version one")
+        workspace.writeFile("src/Main.kt", "version two")
+
+        assertTrue(workspace.canUndo("src/Main.kt"))
+        assertTrue(workspace.undoFile("src/Main.kt"))
+        assertEquals("version one", workspace.readFile("src/Main.kt"))
+        assertTrue(!workspace.canUndo("src/Main.kt"))
+        assertTrue(!workspace.undoFile("src/Main.kt"))
+    }
+
     @Test
     fun rejectsParentTraversal() {
         val workspace = WorkspaceTools(temporaryFolder.newFolder("workspace"))
