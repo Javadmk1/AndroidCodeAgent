@@ -33,6 +33,7 @@ fun GitHubHubDialog(keys: SecureKeyStore, onDismiss: () -> Unit, onStatus: (Stri
     var error by remember { mutableStateOf("") }
     var repoInfo by remember { mutableStateOf("") }
     var confirmCreate by remember { mutableStateOf(false) }
+    var confirmDeleteToken by remember { mutableStateOf(false) }
     fun savedToken(): String? = token.trim().takeIf { it.isNotBlank() } ?: keys.read("github")
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -47,6 +48,7 @@ fun GitHubHubDialog(keys: SecureKeyStore, onDismiss: () -> Unit, onStatus: (Stri
                             .onSuccess { token = ""; error = "توکن به‌صورت رمزنگاری‌شده ذخیره شد." }
                             .onFailure { error = it.message ?: "ذخیره توکن ناموفق بود." }
                     }, enabled = token.isNotBlank()) { Text("ذخیره امن توکن") }
+                    TextButton(onClick = { confirmDeleteToken = true }, enabled = keys.hasKey("github")) { Text("حذف توکن") }
                     Button(onClick = {
                         scope.launch {
                             busy = true; error = ""
@@ -86,6 +88,13 @@ fun GitHubHubDialog(keys: SecureKeyStore, onDismiss: () -> Unit, onStatus: (Stri
         },
         confirmButton = { TextButton(onClick = { confirmCreate = true }, enabled = !busy && repository.isNotBlank() && head.isNotBlank() && base.isNotBlank() && title.isNotBlank() && !savedToken().isNullOrBlank()) { Text("ایجاد PR") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("بستن") } }
+    )
+    if (confirmDeleteToken) AlertDialog(
+        onDismissRequest = { confirmDeleteToken = false },
+        title = { Text("حذف توکن GitHub؟") },
+        text = { Text("توکن رمزنگاری‌شده GitHub از حافظه امن این دستگاه حذف شود؟") },
+        confirmButton = { TextButton(onClick = { keys.delete("github"); confirmDeleteToken = false; token = ""; error = "توکن ذخیره‌شده حذف شد." }) { Text("حذف توکن") } },
+        dismissButton = { TextButton(onClick = { confirmDeleteToken = false }) { Text("انصراف") } }
     )
     if (confirmCreate) AlertDialog(
         onDismissRequest = { confirmCreate = false },
