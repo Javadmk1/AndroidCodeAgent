@@ -68,7 +68,7 @@ Important limits:
 - The task queue and project checklist are stored locally per project. Queued prompts survive app restarts, but they are deliberately loaded into the chat for a user-reviewed send; they are not automatically executed in the background.
 - Parallel reviewers run three independent, bounded, read-only snapshots. They can inspect and report findings, but they do not edit files or run builds.
 - GitHub support currently covers repository metadata, up to 100 branches, up to 50 open pull requests, and confirmed Pull Request creation from an existing remote branch. It does not yet provide local Git clone/commit/push, branch creation, conflict resolution, or automatic merge.
-- Long-running model calls are not yet hosted in an Android foreground service. Closing the app can stop an active request; use the persistent queue to retain work that has not yet been sent.
+- Long-running model calls are not yet hosted in an Android foreground service. Closing the app can stop an active request; use the persistent queue to retain work that has not yet been sent. Explicit cancellation now disconnects the active provider HTTP connection, but physical-device cancellation and process-death behavior still require device testing.
 
 ## Security and product boundaries
 
