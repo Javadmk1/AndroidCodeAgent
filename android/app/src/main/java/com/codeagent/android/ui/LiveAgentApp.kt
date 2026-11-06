@@ -172,6 +172,21 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             } finally { transferBusy = false }
         }
     }
+    val zipImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            transferBusy = true
+            status = "در حال بررسی و وارد کردن ZIP..."
+            try {
+                val result = transfer.importZip(uri)
+                status = "ورود ZIP موفق بود: ${result.files} فایل، ${result.bytes / 1024} کیلوبایت"
+                projects = projectStore.loadProjects()
+                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                status = "خطای ورود ZIP: ${e.message ?: "نامشخص"}"
+                Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+            } finally { transferBusy = false }
+        }
+    }
     val attachmentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             try {
@@ -476,6 +491,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                         status = "پروژه حذف شد."
                     }.onFailure { status = "خطای حذف پروژه: " + (it.message ?: "نامشخص") } },
                     onImport = { importLauncher.launch(null) },
+                    onImportZip = { zipImportLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
                     onBrowse = { showWorkspace = true },
                     onBuild = { showBuildManager = true },
                     onExport = { exportLauncher.launch("android-code-agent-project.zip") }
