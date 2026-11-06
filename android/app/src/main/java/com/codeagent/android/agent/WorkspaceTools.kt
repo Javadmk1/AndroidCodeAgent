@@ -109,7 +109,11 @@ class WorkspaceTools(workspaceDirectory: File) {
     fun searchInFiles(query: String, relativePath: String = ""): List<SearchMatch> {
         require(query.isNotBlank()) { "Search query is empty" }
         val start = resolve(relativePath)
+        val excludedDirectories = setOf(".git", ".gradle", ".idea", ".kotlin", "build", ".codeagent-history")
         val files = if (start.isFile) listOf(start) else start.walkTopDown()
+            .onEnter { directory ->
+                directory == start || directory.name !in excludedDirectories
+            }
             .filter { it.isFile && it.length() <= MAX_FILE_BYTES }
             .take(MAX_SEARCH_FILES)
             .toList()
