@@ -8,6 +8,10 @@ import com.codeagent.android.agent.BuildProjectService
 import com.codeagent.android.agent.ToolRegistry
 import com.codeagent.android.agent.WorkspaceTools
 import com.codeagent.android.agent.TextDiff
+import com.codeagent.android.agent.WorkQueueStore
+import com.codeagent.android.agent.WorkItem
+import com.codeagent.android.agent.ParallelReviewCoordinator
+import com.codeagent.android.agent.ParallelReviewResult
 import com.codeagent.android.llm.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -70,7 +74,7 @@ private enum class MainTab { CHAT, PROJECTS, HISTORY, SETTINGS }
 
 private const val AGENT_SYSTEM_PROMPT = """
 You are an Android coding assistant working only inside the user's imported project workspace.
-Your available tools are list_files, read_file, search_in_files, diff_file, write_file, and build_project. Use diff_file to show the exact proposed changes before asking for write_file approval. Use build_project with assembleDebug when the user asks to build an APK; it requires explicit confirmation and a configured isolated builder. Use testDebugUnitTest, lintDebug, check, tasks, or clean only when appropriate.
+Your available tools are list_files, read_file, search_in_files, diff_file, undo_file, write_file, and build_project. Use undo_file only when the user asks to restore the last saved version; it also requires explicit approval. Use diff_file to show the exact proposed changes before asking for write_file approval. Use build_project with assembleDebug when the user asks to build an APK; it requires explicit confirmation and a configured isolated builder. Use testDebugUnitTest, lintDebug, check, tasks, or clean only when appropriate.
 Start by inspecting the project structure and relevant source files before proposing changes.
 Use the tools when file inspection or editing is needed; do not merely describe edits that you can perform.
 Never overwrite a file without first reading it when it already exists.
@@ -108,6 +112,10 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var showWorkspace by remember { mutableStateOf(false) }
     var showHtmlPreview by remember { mutableStateOf(false) }
     var showBuildManager by remember { mutableStateOf(false) }
+    var showTaskCenter by remember { mutableStateOf(false) }
+    var showParallelReviewReport by remember { mutableStateOf(false) }
+    var parallelReviewBusy by remember { mutableStateOf(false) }
+    var parallelReviewResults by remember { mutableStateOf<List<ParallelReviewResult>>(emptyList()) }
     var confirmClearHistory by remember { mutableStateOf(false) }
     var showConversationList by remember { mutableStateOf(false) }
     var renameConversationId by remember { mutableStateOf<String?>(null) }
@@ -132,8 +140,10 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     val scope = rememberCoroutineScope()
     val client = remember { LlmClient() }
     val projectStore = remember(context) { ProjectStore(context) }
+    val workQueueStore = remember(context) { WorkQueueStore(context) }
     var projects by remember(projectStore) { mutableStateOf(projectStore.loadProjects()) }
     var activeProjectId by remember(projectStore) { mutableStateOf(projectStore.activeProjectId()) }
+    var workItems by remember(workQueueStore, activeProjectId) { mutableStateOf(workQueueStore.list(activeProjectId)) }
     val activeProject = projects.firstOrNull { it.id == activeProjectId }
     val activeProjectName = activeProject?.name ?: "پروژه من"
     val workspaceDirectory = remember(context, activeProjectId) { projectStore.directory(activeProjectId) }
@@ -251,6 +261,29 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                         IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "ابزارهای پروژه") }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                             DropdownMenuItem(text = { Text("گفتگوها") }, leadingIcon = { Icon(Icons.Default.Forum, null) }, onClick = { menuExpanded = false; showConversationList = true })
+                            DropdownMenuItem(text = { Text("صف کارها و برنامه پروژه") }, leadingIcon = { Icon(Icons.Default.History, null) }, onClick = { menuExpanded = false; workItems = workQueueStore.list(activeProjectId); showTaskCenter = true })
+                            DropdownMenuItem(text = { Text(if (parallelReviewBusy) "بررسی موازی در حال اجرا..." else "بررسی موازی با ۳ ایجنت") }, leadingIcon = { Icon(Icons.Default.Code, null) }, enabled = !parallelReviewBusy && !busy, onClick = {
+                                menuExpanded = false
+                                val secret = keys.read(config.provider)
+                                if (secret.isNullOrBlank()) { status = "برای بررسی موازی ابتدا کلید API را تنظیم کن."; settings = true }
+                                else scope.launch {
+                                    parallelReviewBusy = true
+                                    parallelReviewResults = emptyList()
+                                    status = "سه ایجنت در محیط‌های جداگانه در حال بررسی فقط‌خواندنی هستند..."
+                                    try {
+                                        parallelReviewResults = ParallelReviewCoordinator(context.cacheDir).review(workspaceDirectory, config, secret) { event ->
+                                            withContext(Dispatchers.Main.immediate) {
+                                                agentEvents.add(event)
+                                                if (agentEvents.size > 80) agentEvents.removeAt(0)
+                                            }
+                                        }
+                                        showParallelReviewReport = true
+                                        status = "بررسی موازی به پایان رسید؛ گزارش‌ها آماده‌اند."
+                                    } catch (e: Exception) {
+                                        status = "بررسی موازی ناموفق بود: " + (e.message ?: "خطای نامشخص")
+                                    } finally { parallelReviewBusy = false }
+                                }
+                            })
                             DropdownMenuItem(text = { Text("وارد کردن پروژه") }, leadingIcon = { Icon(Icons.Default.FolderOpen, null) }, onClick = { menuExpanded = false; importLauncher.launch(null) })
                             DropdownMenuItem(text = { Text("فایل‌های پروژه") }, leadingIcon = { Icon(Icons.Default.Folder, null) }, onClick = { menuExpanded = false; showWorkspace = true })
                             DropdownMenuItem(text = { Text("پیش‌نمایش HTML") }, leadingIcon = { Icon(Icons.Default.Code, null) }, enabled = !htmlPreview.isNullOrBlank(), onClick = { menuExpanded = false; showHtmlPreview = true })
@@ -672,6 +705,43 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             dismissButton = { TextButton(onClick = { pendingZipUri = null }) { Text("انصراف") } }
         )
     }
+
+    if (showTaskCenter) TaskCenterDialog(
+        items = workItems,
+        onAddPrompt = { value ->
+            runCatching { workQueueStore.addPrompt(activeProjectId, value) }
+                .onSuccess { workItems = workQueueStore.list(activeProjectId); status = "درخواست به صف ذخیره شد." }
+                .onFailure { status = "ذخیره درخواست ناموفق بود: " + (it.message ?: "خطای نامشخص") }
+        },
+        onAddPlanStep = { title, details ->
+            runCatching { workQueueStore.addPlanStep(activeProjectId, title, details) }
+                .onSuccess { workItems = workQueueStore.list(activeProjectId); status = "مرحله به برنامه پروژه اضافه شد." }
+                .onFailure { status = "افزودن مرحله ناموفق بود: " + (it.message ?: "خطای نامشخص") }
+        },
+        onToggle = { item, checked -> workQueueStore.setCompleted(item.id, checked); workItems = workQueueStore.list(activeProjectId) },
+        onRemove = { item -> workQueueStore.remove(item.id); workItems = workQueueStore.list(activeProjectId) },
+        onUsePrompt = { item ->
+            val queued = workQueueStore.consumePrompt(item.id)
+            if (queued != null) { prompt = queued; workItems = workQueueStore.list(activeProjectId); showTaskCenter = false; selectedTab = MainTab.CHAT; status = "درخواست به کادر چت منتقل شد؛ برای اجرا ارسالش کن." }
+        },
+        onDismiss = { showTaskCenter = false }
+    )
+
+    if (showParallelReviewReport) AlertDialog(
+        onDismissRequest = { showParallelReviewReport = false },
+        title = { Text("گزارش بررسی موازی") },
+        text = {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("سه ایجنت در snapshotهای جدا و فقط‌خواندنی کار کردند. هیچ فایلی در پروژه اصلی تغییر نکرد.", style = MaterialTheme.typography.bodySmall)
+                parallelReviewResults.forEach { result ->
+                    Text(result.role, style = MaterialTheme.typography.titleSmall)
+                    Text(result.error?.let { "خطا: " + it } ?: result.report, style = MaterialTheme.typography.bodySmall)
+                    HorizontalDivider()
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showParallelReviewReport = false }) { Text("بستن گزارش") } }
+    )
 
     if (showWorkspace) WorkspaceBrowser(workspaceDirectory) { showWorkspace = false }
     if (showHtmlPreview && !htmlPreview.isNullOrBlank()) HtmlPreviewDialog(htmlPreview, onDismiss = { showHtmlPreview = false })
