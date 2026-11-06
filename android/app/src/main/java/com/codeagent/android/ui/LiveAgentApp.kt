@@ -74,7 +74,7 @@ private enum class MainTab { CHAT, PROJECTS, HISTORY, SETTINGS }
 
 private const val AGENT_SYSTEM_PROMPT = """
 You are an Android coding assistant working only inside the user's imported project workspace.
-Your available tools are list_files, read_file, search_in_files, diff_file, undo_file, write_file, and build_project. Use undo_file only when the user asks to restore the last saved version; it also requires explicit approval. Use diff_file to show the exact proposed changes before asking for write_file approval. Use build_project with assembleDebug when the user asks to build an APK; it requires explicit confirmation and a configured isolated builder. Use testDebugUnitTest, lintDebug, check, tasks, or clean only when appropriate.
+Your available tools are list_files, read_file, search_in_files, diff_file, undo_file, write_file, create_plan_step, queue_request, and build_project. When asked to plan a non-trivial task, inspect first and add 3-8 ordered, testable steps with create_plan_step. Do not mark steps complete unless the user verifies the work. Use queue_request only when the user explicitly asks to save a future request for later. Use undo_file only when the user asks to restore the last saved version; it also requires explicit approval. Use diff_file to show the exact proposed changes before asking for write_file approval. Use build_project with assembleDebug when the user asks to build an APK; it requires explicit confirmation and a configured isolated builder. Use testDebugUnitTest, lintDebug, check, tasks, or clean only when appropriate.
 Start by inspecting the project structure and relevant source files before proposing changes.
 Use the tools when file inspection or editing is needed; do not merely describe edits that you can perform.
 Never overwrite a file without first reading it when it already exists.
@@ -151,10 +151,20 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     val workspaceTools = remember(workspaceDirectory) { WorkspaceTools(workspaceDirectory) }
     val transfer = remember(context, activeProjectId) { ProjectTransfer(context, workspaceDirectory) }
     val buildService = remember(context, keys) { BuildProjectService(context, keys) }
-    val runtime = remember(workspaceTools, buildService) {
+    val runtime = remember(workspaceTools, buildService, workQueueStore, activeProjectId) {
         AgentRuntime(ToolRegistry(
             workspaceTools,
-            buildProject = { task, report -> buildService.build(workspaceDirectory, task, report) }
+            buildProject = { task, report -> buildService.build(workspaceDirectory, task, report) },
+            createPlanStep = { title, details ->
+                val item = workQueueStore.addPlanStep(activeProjectId, title, details)
+                withContext(Dispatchers.Main.immediate) { workItems = workQueueStore.list(activeProjectId) }
+                org.json.JSONObject().put("ok", true).put("id", item.id).put("title", item.title)
+            },
+            queuePrompt = { queuedPrompt ->
+                val item = workQueueStore.addPrompt(activeProjectId, queuedPrompt)
+                withContext(Dispatchers.Main.immediate) { workItems = workQueueStore.list(activeProjectId) }
+                org.json.JSONObject().put("ok", true).put("id", item.id).put("title", item.title)
+            }
         ))
     }
     val lines = remember(historyStore, activeConversationId) {
