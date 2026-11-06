@@ -29,7 +29,7 @@ fun WorkspaceBrowser(workspaceDirectory: File, onDismiss: () -> Unit) {
             .filter { it.isFile && it.length() <= 1_048_576L }
             .take(500)
             .map { workspaceDirectory.toPath().relativize(it.toPath()).toString().replace(File.separatorChar, '/') }
-            .filter { path -> path.split('/').none { it in setOf(".git", ".gradle", "build", ".idea", ".kotlin") } }
+            .filter { path -> path.split('/').none { it in setOf(".git", ".gradle", "build", ".idea", ".kotlin", ".codeagent-history") } }
             .sorted()
             .toList()
     }
