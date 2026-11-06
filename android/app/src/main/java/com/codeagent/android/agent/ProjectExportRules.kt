@@ -16,7 +16,7 @@ internal object ProjectExportRules {
     )
 
     fun isSensitivePath(relativePath: String): Boolean {
-        val segments = relativePath.replace('\\\\', '/').split('/')
+        val segments = relativePath.replace(92.toChar(), '/').split('/')
         if (segments.any { it.isBlank() || it == "." || it == ".." }) return true
         return segments.any { segment ->
             val name = segment.lowercase()
