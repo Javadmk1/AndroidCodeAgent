@@ -63,11 +63,12 @@ class ProjectTransfer(
                         context.contentResolver.openInputStream(child.uri)?.use { input ->
                             destination.outputStream().use { output ->
                                 val buffer = ByteArray(8192)
+                                var fileBytes = 0L
                                 while (true) {
                                     val read = input.read(buffer)
                                     if (read < 0) break
+                                    fileBytes += read
                                     total += read
-                                    val fileBytes = destination.length() + read
                                     require(fileBytes <= MAX_FILE_BYTES) { "فایل $name بیش از ۱۰ مگابایت است." }
                                     require(total <= MAX_TOTAL_BYTES) { "حجم پروژه بیش از ۱۰۰ مگابایت است." }
                                     output.write(buffer, 0, read)

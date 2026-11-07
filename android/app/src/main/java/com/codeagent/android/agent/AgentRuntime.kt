@@ -170,7 +170,8 @@ class AgentRuntime(
                 error("API error $code: ${errorText.take(1000)}")
             }
             val contentType = connection.contentType.orEmpty()
-            if (!contentType.contains("text/event-stream", ignoreCase = true)) {
+            if (contentType.contains("application/json", ignoreCase = true) ||
+                contentType.contains("application/problem+json", ignoreCase = true)) {
                 val raw = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
                 val json = runCatching { JSONObject(raw) }.getOrElse {
                     throw IllegalStateException("پاسخ API نه SSE معتبر بود و نه JSON؛ Content-Type: " + contentType)
