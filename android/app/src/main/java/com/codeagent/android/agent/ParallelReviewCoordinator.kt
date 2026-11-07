@@ -72,6 +72,7 @@ class ParallelReviewCoordinator(private val cacheDirectory: File) {
             require(!java.nio.file.Files.isSymbolicLink(file.toPath())) { "بررسی موازی به لینک نمادین برخورد کرد؛ برای امنیت متوقف شد." }
             val relative = source.toPath().relativize(file.toPath()).toString()
             if (relative.isBlank()) return@forEach
+            if (ProjectExportRules.isSensitivePath(relative.replace(File.separatorChar, '/'))) return@forEach
             val target = File(destination, relative)
             if (file.isDirectory) {
                 require(target.exists() || target.mkdirs()) { "ساخت پوشه snapshot ناموفق بود." }

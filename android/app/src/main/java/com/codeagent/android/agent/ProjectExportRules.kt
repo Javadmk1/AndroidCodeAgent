@@ -3,12 +3,8 @@ package com.codeagent.android.agent
 /** Filename/path rules for preventing common local credentials from entering project exports. */
 internal object ProjectExportRules {
     private val sensitiveExactNames = setOf(
-        "local.properties",
-        ".npmrc",
-        ".pypirc",
-        ".netrc",
-        "id_rsa",
-        "id_ed25519"
+        "local.properties", ".npmrc", ".pypirc", ".netrc",
+        "id_rsa", "id_ed25519", "key.properties"
     )
 
     private val sensitiveExtensions = setOf(
@@ -21,9 +17,12 @@ internal object ProjectExportRules {
         return segments.any { segment ->
             val name = segment.lowercase()
             name in sensitiveExactNames ||
+                name == ".ssh" || name == ".codeagent-history" ||
                 name == ".env" || name.startsWith(".env.") ||
                 name == "credentials" || name.startsWith("credentials.") ||
+                name.contains("service-account") ||
                 name == "secrets" || name.startsWith("secrets.") ||
+                name.endsWith(".mobileprovision") ||
                 sensitiveExtensions.any { name.endsWith(it) }
         }
     }

@@ -20,6 +20,7 @@ class WorkspaceTools(workspaceDirectory: File) {
         val directory = resolve(relativePath)
         require(directory.isDirectory) { "Not a directory: $relativePath" }
         return directory.listFiles()
+            ?.filterNot { it.name == ".codeagent-history" || it.name == ".ssh" }
             ?.sortedBy { it.name.lowercase() }
             ?.map { file ->
                 val child = if (relativePath.isBlank()) file.name else relativePath.trimEnd('/') + "/" + file.name
@@ -139,9 +140,17 @@ class WorkspaceTools(workspaceDirectory: File) {
     }
 
     private fun resolve(relativePath: String): File {
+        val normalized = relativePath.replace('\\\\', '/')
+        require(normalized.split('/').none { it == ".codeagent-history" || it == ".ssh" }) {
+            "دسترسی به تاریخچه داخلی و کلیدهای SSH از ابزارهای ایجنت مجاز نیست."
+        }
         val candidate = if (relativePath.isBlank()) root else File(root, relativePath)
         val canonical = candidate.canonicalFile
         require(canonical.toPath().startsWith(root.toPath())) { "Path escapes workspace" }
+        val privateHistory = File(root, ".codeagent-history").canonicalFile.toPath()
+        require(!canonical.toPath().startsWith(privateHistory)) {
+            "دسترسی به نسخه‌های پشتیبان داخلی از ابزارهای ایجنت مجاز نیست."
+        }
         return canonical
     }
 

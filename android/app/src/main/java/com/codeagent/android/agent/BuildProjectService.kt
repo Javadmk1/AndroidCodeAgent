@@ -83,12 +83,8 @@ class BuildProjectService(
                 if (file.isDirectory) return@forEach
                 require(file.isFile && !Files.isSymbolicLink(file.toPath())) { "فایل نامعتبر یا پیوند نمادین در پروژه: $relative" }
                 val lowerName = file.name.lowercase()
-                require(lowerName != "key.properties" &&
-                    !lowerName.endsWith(".jks") && !lowerName.endsWith(".keystore") &&
-                    !lowerName.endsWith(".p12") && !lowerName.endsWith(".pfx") &&
-                    !lowerName.endsWith(".pem") && lowerName != ".env" &&
-                    !lowerName.contains("service-account") && !lowerName.contains("credentials")) {
-                    "فایل دارای نام حساس شناسایی شد؛ قبل از آپلود آن را از پروژه خارج کن: $relative"
+                require(!ProjectExportRules.isSensitivePath(relative.replace(File.separatorChar, '/'))) {
+                    "فایل یا مسیر حساس شناسایی شد؛ برای جلوگیری از ارسال اسرار، ساخت متوقف شد: $relative"
                 }
                 val size = file.length()
                 require(size <= 10L * 1024 * 1024) { "فایل $relative بیش از ۱۰ مگابایت است." }

@@ -67,6 +67,8 @@ class ProjectTransfer(
                                     val read = input.read(buffer)
                                     if (read < 0) break
                                     total += read
+                                    val fileBytes = destination.length() + read
+                                    require(fileBytes <= MAX_FILE_BYTES) { "فایل $name بیش از ۱۰ مگابایت است." }
                                     require(total <= MAX_TOTAL_BYTES) { "حجم پروژه بیش از ۱۰۰ مگابایت است." }
                                     output.write(buffer, 0, read)
                                 }
@@ -120,6 +122,9 @@ class ProjectTransfer(
                     val normalizedRaw = rawName.trimEnd('/')
                     require(normalizedRaw.isNotBlank()) { "نام فایل ZIP نامعتبر است." }
                     val segments = normalizedRaw.split('/')
+                    require(segments.size <= MAX_DIRECTORY_DEPTH + 1) {
+                        "عمق مسیر در ZIP بیش از حد مجاز است: $rawName"
+                    }
                     require(segments.none { it.isBlank() || it == "." || it == ".." }) {
                         "مسیر ناامن در ZIP: $rawName"
                     }
@@ -211,6 +216,7 @@ class ProjectTransfer(
 
     private companion object {
         const val MAX_FILES = 5_000
+        const val MAX_DIRECTORY_DEPTH = 64
         const val MAX_FILE_BYTES = 10L * 1024 * 1024
         const val MAX_TOTAL_BYTES = 100L * 1024 * 1024
         val SKIP_DIRS = setOf(".git", ".gradle", "build", ".idea", ".kotlin", ".codeagent-history")
