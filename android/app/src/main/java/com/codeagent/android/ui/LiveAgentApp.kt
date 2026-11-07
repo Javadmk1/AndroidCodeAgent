@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -124,6 +125,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var deletingConversationId by remember { mutableStateOf<String?>(null) }
     var confirmDeleteKey by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var testingConnection by remember { mutableStateOf(false) }
     var transferBusy by remember { mutableStateOf(false) }
     var pendingZipUri by remember { mutableStateOf<Uri?>(null) }
     var activeJob by remember { mutableStateOf<Job?>(null) }
@@ -140,6 +142,11 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var buildApprovalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     val scope = rememberCoroutineScope()
     val client = remember { LlmClient() }
+    val connectionTester = remember { ApiConnectionTester() }
+    val chatListState = rememberLazyListState()
+    LaunchedEffect(lines.size, lines.lastOrNull()?.text, busy) {
+        if (lines.isNotEmpty()) chatListState.animateScrollToItem(lines.lastIndex)
+    }
     val projectStore = remember(context) { ProjectStore(context) }
     val workQueueStore = remember(context) { WorkQueueStore(context) }
     var projects by remember(projectStore) { mutableStateOf(projectStore.loadProjects()) }
@@ -391,6 +398,11 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                         onActivity = { event ->
                                                             withContext(Dispatchers.Main.immediate) {
                                                                 agentEvents.add(event)
+                                                                status = when {
+                                                                    event.startsWith("درخواست به مدل ارسال شد") -> "مدل در حال فکر کردن و تولید پاسخ زنده است..."
+                                                                    event.startsWith("اجرای ابزار:") -> event
+                                                                    else -> event
+                                                                }
                                                                 if (agentEvents.size > 80) agentEvents.removeAt(0)
                                                                 if (event.contains("APK ساخته و دریافت شد")) buildOutput = event + "\nفایل خروجی در بخش ساخت APK آماده ذخیره است."
                                                                 if (event.startsWith("وضعیت ساخت:")) buildStatus = event
@@ -460,11 +472,11 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         Column(Modifier.fillMaxSize().padding(padding)) {
             when (selectedTab) {
                 MainTab.CHAT -> {
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding=PaddingValues(12.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                    LazyColumn(state = chatListState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding=PaddingValues(12.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
                         itemsIndexed(lines) { index, line ->
                             Row(Modifier.fillMaxWidth(), horizontalArrangement=if(line.role=="user") Arrangement.End else Arrangement.Start) {
                                 Surface(color=if(line.role=="user") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, shape=RoundedCornerShape(16.dp), modifier=Modifier.widthIn(max=340.dp)) {
-                                    Text(if(line.text.isBlank() && busy) "در حال دریافت پاسخ..." else line.text, Modifier.padding(12.dp))
+                                    Text(if(line.text.isBlank() && busy) "در حال فکرکردن و دریافت پاسخ زنده..." else line.text, Modifier.padding(12.dp))
                                 }
                                 MessageActions(text = line.text, editable = line.role == "user") {
                                     prompt = line.text
@@ -865,6 +877,29 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                     OutlinedTextField(endpoint,{endpoint=it},label={Text("Base URL (HTTPS)")},singleLine=true)
                     OutlinedTextField(apiKey,{apiKey=it},label={Text("API Key")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password),singleLine=true)
                     Text("کلید با Android Keystore رمزنگاری می‌شود. ابزارهای عامل از APIهای سازگار با OpenAI و Anthropic Messages پشتیبانی می‌کنند.", style=MaterialTheme.typography.bodySmall)
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                testingConnection = true
+                                status = "در حال آزمایش واقعی اتصال API..."
+                                try {
+                                    val candidate = ProviderConfig(provider.trim(), model.trim(), endpoint.trim())
+                                    val secret = apiKey.trim().ifBlank { keys.read(candidate.provider).orEmpty() }
+                                    require(secret.isNotBlank()) { "ابتدا کلید API را وارد کن." }
+                                    status = connectionTester.test(candidate, secret)
+                                } catch (error: Exception) {
+                                    status = "آزمایش اتصال ناموفق بود: " + (error.message ?: "خطای نامشخص")
+                                } finally {
+                                    testingConnection = false
+                                }
+                            }
+                        },
+                        enabled = !testingConnection && provider.isNotBlank() && model.isNotBlank() && endpoint.isNotBlank()
+                    ) {
+                        if (testingConnection) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (testingConnection) "در حال آزمایش..." else "آزمایش اتصال API")
+                    }
                     TextButton(onClick = { confirmDeleteKey = true }, enabled = keys.hasKey(config.provider)) { Text("حذف کلید ذخیره‌شده این سرویس") }
                 }
             },

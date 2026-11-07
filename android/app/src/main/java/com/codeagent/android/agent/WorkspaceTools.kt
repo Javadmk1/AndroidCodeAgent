@@ -140,7 +140,7 @@ class WorkspaceTools(workspaceDirectory: File) {
     }
 
     private fun resolve(relativePath: String): File {
-        val normalized = relativePath.replace('\\\\', '/')
+        val normalized = relativePath.replace(92.toChar(), '/')
         require(normalized.split('/').none { it == ".codeagent-history" || it == ".ssh" }) {
             "دسترسی به تاریخچه داخلی و کلیدهای SSH از ابزارهای ایجنت مجاز نیست."
         }

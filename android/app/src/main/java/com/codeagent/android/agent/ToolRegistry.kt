@@ -1,6 +1,7 @@
 package com.codeagent.android.agent
 
 import org.json.JSONObject
+import kotlinx.coroutines.CancellationException
 
 /**
  * Local tool dispatcher. Read-only operations are immediate; writes require
@@ -25,7 +26,8 @@ class ToolRegistry(
         approveBuild: suspend (task: String) -> Boolean = { false },
         onActivity: suspend (String) -> Unit = {}
     ): JSONObject {
-        return when (toolName) {
+        return try {
+        when (toolName) {
             "list_files" -> {
                 val path = arguments.optString("path", "")
                 JSONObject().put("ok", true).put("files", org.json.JSONArray(workspace.listFiles(path)))
@@ -90,6 +92,13 @@ class ToolRegistry(
                 }
             }
             else -> JSONObject().put("ok", false).put("error", "Unknown or disabled tool: $toolName")
+        }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            JSONObject().put("ok", false)
+                .put("error", (error.message ?: "خطای اجرای ابزار").take(800))
+                .put("tool", toolName)
         }
     }
 

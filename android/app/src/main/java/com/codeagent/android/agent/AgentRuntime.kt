@@ -147,7 +147,7 @@ class AgentRuntime(
             JSONObject().put("model", config.model).put("stream", true)
                 .put("messages", openAiMessages).put("tools", openAiTools()).put("tool_choice", "auto")
         }
-        val endpoint = config.baseUrl.trimEnd('/') + if (anthropic) "/messages" else "/chat/completions"
+        val endpoint = ApiEndpoint.chat(config)
         val connection = URL(endpoint).openConnection() as HttpURLConnection
         val cancellationHandle = currentCoroutineContext()[Job]?.let { job ->
             disconnectOnCancellation(connection, job)
@@ -169,7 +169,29 @@ class AgentRuntime(
                 val errorText = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                 error("API error $code: ${errorText.take(1000)}")
             }
-            return if (anthropic) readAnthropicStream(connection, onText) else readOpenAiStream(connection, onText)
+            val contentType = connection.contentType.orEmpty()
+            if (!contentType.contains("text/event-stream", ignoreCase = true)) {
+                val raw = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val json = runCatching { JSONObject(raw) }.getOrElse {
+                    throw IllegalStateException("پاسخ API نه SSE معتبر بود و نه JSON؛ Content-Type: " + contentType)
+                }
+                val responseText = if (anthropic) {
+                    val blocks = json.optJSONArray("content") ?: JSONArray()
+                    (0 until blocks.length()).mapNotNull { blocks.optJSONObject(it) }
+                        .filter { it.optString("type") == "text" }.joinToString("") { it.optString("text") }
+                } else {
+                    val message = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+                    val content = message?.opt("content")
+                    when (content) {
+                        is String -> content
+                        is JSONArray -> (0 until content.length()).mapNotNull { content.optJSONObject(it) }
+                            .filter { it.optString("type") == "text" }.joinToString("") { it.optString("text") }
+                        else -> ""
+                    }
+                }
+                if (responseText.isNotEmpty()) onText(responseText)
+                json
+            } else if (anthropic) readAnthropicStream(connection, onText) else readOpenAiStream(connection, onText)
         } catch (error: Exception) {
             // A disconnect triggered by cancellation can surface as an IOException. Preserve
             // cancellation semantics instead of reporting it as an ordinary provider failure.
@@ -194,9 +216,20 @@ class AgentRuntime(
                 if (!line.startsWith("data:")) continue
                 val payload = line.removePrefix("data:").trim()
                 if (payload.isEmpty() || payload == "[DONE]") continue
-                val chunk = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+                val chunk = runCatching { JSONObject(payload) }.getOrElse {
+                    throw IllegalStateException("پاسخ جریانی OpenAI-compatible خراب است.")
+                }
+                if (chunk.has("error")) throw IllegalStateException(
+                    chunk.optJSONObject("error")?.optString("message") ?: chunk.optString("error")
+                )
                 val delta = chunk.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: continue
-                val content = delta.optString("content").takeUnless { it == "null" }.orEmpty()
+                val rawContent = delta.opt("content")
+                val content = when (rawContent) {
+                    is String -> rawContent
+                    is JSONArray -> (0 until rawContent.length()).mapNotNull { rawContent.optJSONObject(it) }
+                        .filter { it.optString("type") == "text" }.joinToString("") { it.optString("text") }
+                    else -> ""
+                }
                 if (content.isNotEmpty()) {
                     text.append(content)
                     onText(content)
@@ -251,7 +284,13 @@ class AgentRuntime(
                 if (!line.startsWith("data:")) continue
                 val payload = line.removePrefix("data:").trim()
                 if (payload.isEmpty() || payload == "[DONE]") continue
-                val event = runCatching { JSONObject(payload) }.getOrNull() ?: continue
+                val event = runCatching { JSONObject(payload) }.getOrElse {
+                    throw IllegalStateException("پاسخ جریانی Anthropic خراب است.")
+                }
+                if (event.optString("type", eventName) == "error" || event.has("error")) {
+                    val error = event.optJSONObject("error")
+                    throw IllegalStateException(error?.optString("message") ?: event.optString("message", "خطای سرویس Anthropic"))
+                }
                 when (event.optString("type", eventName)) {
                     "content_block_start" -> {
                         val index = event.optInt("index")

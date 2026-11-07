@@ -22,11 +22,7 @@ class LlmClient {
             var connection: HttpURLConnection? = null
             try {
                 val anthropic = config.provider == "anthropic"
-                val endpoint = if (anthropic) {
-                    config.baseUrl.trimEnd('/') + "/messages"
-                } else {
-                    config.baseUrl.trimEnd('/') + "/chat/completions"
-                }
+                val endpoint = ApiEndpoint.chat(config)
                 connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 20_000
