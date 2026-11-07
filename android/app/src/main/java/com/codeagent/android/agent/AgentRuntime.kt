@@ -167,7 +167,19 @@ class AgentRuntime(
             val code = connection.responseCode
             if (code !in 200..299) {
                 val errorText = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                error("API error $code: ${errorText.take(1000)}")
+                val detail = runCatching {
+                    val json = JSONObject(errorText)
+                    json.optJSONObject("error")?.optString("message")
+                        ?: json.optString("message").takeIf { it.isNotBlank() } ?: errorText
+                }.getOrDefault(errorText)
+                val hint = when (code) {
+                    401, 403 -> "کلید API یا مجوز دسترسی نامعتبر است."
+                    404 -> "آدرس endpoint یا نام مدل پیدا نشد."
+                    429 -> "سهمیه یا محدودیت درخواست سرویس پر شده است."
+                    400 -> "ساختار درخواست یا قابلیت ابزارهای مدل پذیرفته نشد."
+                    else -> "درخواست به سرویس مدل ناموفق بود."
+                }
+                error("HTTP " + code + " · " + hint + " " + detail.take(900))
             }
             val contentType = connection.contentType.orEmpty()
             if (contentType.contains("application/json", ignoreCase = true) ||

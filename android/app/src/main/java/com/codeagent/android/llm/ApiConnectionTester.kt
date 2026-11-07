@@ -18,7 +18,7 @@ class ApiConnectionTester {
             JSONObject().put("model", config.model).put("max_tokens", 12).put("stream", false)
                 .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "Reply with OK")))
         } else {
-            JSONObject().put("model", config.model).put("stream", false).put("max_tokens", 12)
+            JSONObject().put("model", config.model).put("stream", false)
                 .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "Reply with OK")))
         }
         val connection = URL(endpoint).openConnection() as HttpURLConnection

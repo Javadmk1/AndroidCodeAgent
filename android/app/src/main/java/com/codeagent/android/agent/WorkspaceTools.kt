@@ -20,7 +20,7 @@ class WorkspaceTools(workspaceDirectory: File) {
         val directory = resolve(relativePath)
         require(directory.isDirectory) { "Not a directory: $relativePath" }
         return directory.listFiles()
-            ?.filterNot { it.name == ".codeagent-history" || it.name == ".ssh" }
+            ?.filterNot { ProjectExportRules.isSensitivePath(it.name) }
             ?.sortedBy { it.name.lowercase() }
             ?.map { file ->
                 val child = if (relativePath.isBlank()) file.name else relativePath.trimEnd('/') + "/" + file.name
@@ -122,9 +122,15 @@ class WorkspaceTools(workspaceDirectory: File) {
         val excludedDirectories = setOf(".git", ".gradle", ".idea", ".kotlin", "build", ".codeagent-history")
         val files = if (start.isFile) listOf(start) else start.walkTopDown()
             .onEnter { directory ->
-                directory == start || directory.name !in excludedDirectories
+                directory == start || (
+                    directory.name !in excludedDirectories &&
+                    !ProjectExportRules.isSensitivePath(root.toPath().relativize(directory.toPath()).toString())
+                )
             }
-            .filter { it.isFile && it.length() <= MAX_FILE_BYTES }
+            .filter {
+                val relative = root.toPath().relativize(it.toPath()).toString()
+                it.isFile && it.length() <= MAX_FILE_BYTES && !ProjectExportRules.isSensitivePath(relative)
+            }
             .take(MAX_SEARCH_FILES)
             .toList()
         val results = mutableListOf<SearchMatch>()
@@ -141,8 +147,8 @@ class WorkspaceTools(workspaceDirectory: File) {
 
     private fun resolve(relativePath: String): File {
         val normalized = relativePath.replace(92.toChar(), '/')
-        require(normalized.split('/').none { it == ".codeagent-history" || it == ".ssh" }) {
-            "دسترسی به تاریخچه داخلی و کلیدهای SSH از ابزارهای ایجنت مجاز نیست."
+        require(relativePath.isBlank() || !ProjectExportRules.isSensitivePath(normalized)) {
+            "دسترسی ایجنت به فایل‌ها و مسیرهای دارای احتمال اطلاعات محرمانه مجاز نیست."
         }
         val candidate = if (relativePath.isBlank()) root else File(root, relativePath)
         val canonical = candidate.canonicalFile

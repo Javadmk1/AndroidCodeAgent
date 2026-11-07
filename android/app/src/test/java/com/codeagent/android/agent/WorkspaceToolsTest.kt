@@ -45,7 +45,7 @@ class WorkspaceToolsTest {
         java.io.File(ssh, "id_ed25519").writeText("private key")
 
         assertTrue(workspace.listFiles().none { it.contains(".codeagent-history") || it.contains(".ssh") })
-        listOf(".codeagent-history/backup.kt", ".ssh/id_ed25519").forEach { path ->
+        listOf(".codeagent-history/backup.kt", ".ssh/id_ed25519", ".env", "local.properties", "app/credentials.json").forEach { path ->
             try {
                 workspace.readFile(path)
                 fail("Expected private path to be blocked: " + path)
