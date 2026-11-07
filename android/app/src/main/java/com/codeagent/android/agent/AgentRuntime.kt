@@ -1,6 +1,7 @@
 package com.codeagent.android.agent
 
 import com.codeagent.android.llm.ProviderConfig
+import com.codeagent.android.llm.ApiEndpoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -152,7 +153,7 @@ class AgentRuntime(
         val cancellationHandle = currentCoroutineContext()[Job]?.let { job ->
             disconnectOnCancellation(connection, job)
         }
-        try {
+        return try {
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000
             connection.readTimeout = 120_000
