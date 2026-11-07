@@ -275,6 +275,21 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = {
+                            persistHistory()
+                            val created = historyStore.create()
+                            conversations = historyStore.loadAll()
+                            activeConversationId = created.id
+                            prompt = ""
+                            pendingImageData = null
+                            pendingImageMime = null
+                            pendingAttachmentName = null
+                            selectedTab = MainTab.CHAT
+                            status = "گفتگوی جدید آماده است."
+                        },
+                        enabled = !busy
+                    ) { Icon(Icons.Default.Add, "گفتگوی جدید") }
                     Box {
                         IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "ابزارهای پروژه") }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
@@ -874,7 +889,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                     Text("provider: openai / anthropic / compatible", style=MaterialTheme.typography.labelSmall)
                     OutlinedTextField(provider,{provider=it.trim().lowercase()},label={Text("Provider ID")},singleLine=true)
                     OutlinedTextField(model,{model=it},label={Text("Model")},singleLine=true)
-                    OutlinedTextField(endpoint,{endpoint=it},label={Text("Base URL (HTTPS)")},singleLine=true)
+                    OutlinedTextField(endpoint,{endpoint=it},label={Text("Base URL یا endpoint کامل (HTTPS)")},singleLine=true)
                     OutlinedTextField(apiKey,{apiKey=it},label={Text("API Key")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password),singleLine=true)
                     Text("کلید با Android Keystore رمزنگاری می‌شود. ابزارهای عامل از APIهای سازگار با OpenAI و Anthropic Messages پشتیبانی می‌کنند.", style=MaterialTheme.typography.bodySmall)
                     OutlinedButton(
