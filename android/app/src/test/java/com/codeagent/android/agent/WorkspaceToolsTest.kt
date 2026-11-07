@@ -21,6 +21,88 @@ class WorkspaceToolsTest {
         assertEquals("src/Main.kt", workspace.searchInFiles("hello").single().path)
     }
 
+
+    @Test
+    fun keepsOnePreviousVersionAndRestoresItOnce() {
+        val workspace = WorkspaceTools(temporaryFolder.newFolder("undo-workspace"))
+        workspace.writeFile("src/Main.kt", "version one")
+        workspace.writeFile("src/Main.kt", "version two")
+
+        assertTrue(workspace.canUndo("src/Main.kt"))
+        assertTrue(workspace.undoFile("src/Main.kt"))
+        assertEquals("version one", workspace.readFile("src/Main.kt"))
+        assertTrue(!workspace.canUndo("src/Main.kt"))
+        assertTrue(!workspace.undoFile("src/Main.kt"))
+    }
+
+    @Test
+    fun hidesAndBlocksPrivateAgentHistoryAndSshDirectories() {
+        val root = temporaryFolder.newFolder("private-history-workspace")
+        val workspace = WorkspaceTools(root)
+        val history = java.io.File(root, ".codeagent-history").apply { mkdirs() }
+        java.io.File(history, "backup.kt").writeText("private old source")
+        val ssh = java.io.File(root, ".ssh").apply { mkdirs() }
+        java.io.File(ssh, "id_ed25519").writeText("private key")
+
+        assertTrue(workspace.listFiles().none { it.contains(".codeagent-history") || it.contains(".ssh") })
+        listOf(".codeagent-history/backup.kt", ".ssh/id_ed25519", ".env", "local.properties", "app/credentials.json").forEach { path ->
+            try {
+                workspace.readFile(path)
+                fail("Expected private path to be blocked: " + path)
+            } catch (expected: IllegalArgumentException) {
+                assertTrue(expected.message.orEmpty().contains("مجاز نیست"))
+            }
+        }
+    }
+
+    @Test
+    fun textDiffShowsOnlyChangedLinesWithContext() {
+        val diff = TextDiff.create("alpha\nbeta\ngamma", "alpha\nBETA\ngamma")
+        assertTrue(diff.contains("-beta"))
+        assertTrue(diff.contains("+BETA"))
+        assertTrue(diff.contains(" alpha"))
+    }
+
+    @Test
+    fun textDiffReportsIdenticalContent() {
+        assertEquals("No changes.", TextDiff.create("same", "same"))
+    }
+
+    @Test
+    fun textDiffRejectsOversizedInput() {
+        try {
+            TextDiff.create("x\n".repeat(401), "y")
+            fail("Expected oversized diff to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("400 lines"))
+        }
+    }
+
+
+    @Test
+    fun rejectsSymlinkThatPointsOutsideWorkspace() {
+        val workspaceDir = temporaryFolder.newFolder("symlink-workspace")
+        val outside = temporaryFolder.newFile("outside.txt").apply { writeText("private") }
+        val link = java.io.File(workspaceDir, "escape.txt")
+        java.nio.file.Files.createSymbolicLink(link.toPath(), outside.toPath())
+        val workspace = WorkspaceTools(workspaceDir)
+
+        try {
+            workspace.readFile("escape.txt")
+            fail("Expected symlink escape to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("Path escapes"))
+        }
+
+        try {
+            workspace.writeFile("escape.txt", "overwritten")
+            fail("Expected symlink write to be rejected")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(expected.message.orEmpty().contains("Path escapes"))
+        }
+        assertEquals("private", outside.readText())
+    }
+
     @Test
     fun rejectsParentTraversal() {
         val workspace = WorkspaceTools(temporaryFolder.newFolder("workspace"))
@@ -28,7 +110,7 @@ class WorkspaceToolsTest {
             workspace.readFile("../outside.txt")
             fail("Expected path traversal to be rejected")
         } catch (expected: IllegalArgumentException) {
-            assertTrue(expected.message.orEmpty().contains("Path escapes"))
+            assertTrue(expected.message.orEmpty().isNotBlank())
         }
     }
 

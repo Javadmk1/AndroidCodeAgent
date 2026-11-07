@@ -3,13 +3,23 @@ package com.codeagent.android.ui
 import com.codeagent.android.SecureKeyStore
 import com.codeagent.android.agent.AgentRuntime
 import com.codeagent.android.agent.ProjectTransfer
+import com.codeagent.android.agent.ProjectStore
+import com.codeagent.android.agent.BuildProjectService
 import com.codeagent.android.agent.ToolRegistry
 import com.codeagent.android.agent.WorkspaceTools
+import com.codeagent.android.agent.TextDiff
+import com.codeagent.android.agent.WorkQueueStore
+import com.codeagent.android.agent.WorkItem
+import com.codeagent.android.agent.ParallelReviewCoordinator
+import com.codeagent.android.agent.ParallelReviewResult
 import com.codeagent.android.llm.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -24,7 +34,10 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -50,20 +63,28 @@ import android.util.Base64
 import android.net.Uri
 import android.provider.OpenableColumns
 
+private fun visibleAssistantText(raw: String): String {
+    var value = Regex("(?is)<(think|analysis|reasoning)>.*?</\\1>").replace(raw, "")
+    val unfinished = Regex("(?is)<(think|analysis|reasoning)>").find(value)
+    if (unfinished != null) value = value.substring(0, unfinished.range.first)
+    return value
+}
+
 private data class LiveLine(val role: String, val text: String)
+private enum class MainTab { CHAT, PROJECTS, HISTORY, SETTINGS }
 
 private const val AGENT_SYSTEM_PROMPT = """
 You are an Android coding assistant working only inside the user's imported project workspace.
-Your available project tools are list_files, read_file, search_in_files, and write_file.
+Your available tools are list_files, read_file, search_in_files, diff_file, undo_file, write_file, create_plan_step, queue_request, and build_project. When asked to plan a non-trivial task, inspect first and add 3-8 ordered, testable steps with create_plan_step. Do not mark steps complete unless the user verifies the work. Use queue_request only when the user explicitly asks to save a future request for later. Use undo_file only when the user asks to restore the last saved version; it also requires explicit approval. Use diff_file to show the exact proposed changes before asking for write_file approval. Use build_project with assembleDebug when the user asks to build an APK; it requires explicit confirmation and a configured isolated builder. Use testDebugUnitTest, lintDebug, check, tasks, or clean only when appropriate.
 Start by inspecting the project structure and relevant source files before proposing changes.
 Use the tools when file inspection or editing is needed; do not merely describe edits that you can perform.
 Never overwrite a file without first reading it when it already exists.
 The write_file tool requires explicit user approval; explain the intended change briefly and let the approval dialog decide.
-Do not claim that you compiled, ran, tested, installed, or debugged a project: this app currently has no local Gradle build or shell-execution tool.
+Do not reveal hidden reasoning or private deliberation. Show concise user-facing progress updates and concrete results only. Builds run through the configured isolated Android SDK builder; never claim a build succeeded until the builder confirms it.
 Do not invent files, test results, build results, API responses, or repository state.
-Make focused changes, preserve unrelated code, and explain exactly which files changed and which verification remains.
+For non-trivial tasks, follow a bounded engineering loop: inspect relevant files, summarize a short plan, make a focused change, show diff_file output, request approval for each write, then run the narrowest relevant tests and static checks through build_project. If a check fails, inspect its logs and fix only the demonstrated cause. Do not claim tests passed unless the build service confirms it. Make focused changes, preserve unrelated code, and explain exactly which files changed and which verification remains.
 Do not request or expose API keys, passwords, signing keystores, or other secrets in chat or project files.
-If the task needs a build, explain that the current remote build workflow supports public GitHub repositories and that the user must start it from GitHub Actions.
+If the task needs a build, use the configured isolated project build service when available. Ask for confirmation before starting a build. If no builder is configured, explain the setup requirement clearly. Never expose private reasoning, hidden analysis, or internal deliberation in user-visible messages.
 """
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -82,9 +103,21 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var profilesExpanded by remember { mutableStateOf(false) }
     var prompt by remember { mutableStateOf("") }
     var settings by remember { mutableStateOf(false) }
+    var menuExpanded by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableStateOf(MainTab.CHAT) }
+    var activityPanel by remember { mutableStateOf("activity") }
+    val agentEvents = remember { mutableStateListOf<String>() }
+    var buildStatus by remember { mutableStateOf("هنوز ساختی اجرا نشده است.") }
+    var buildLog by remember { mutableStateOf("") }
+    var buildOutput by remember { mutableStateOf("هنوز APK خروجی دریافت نشده است.") }
     var showWorkspace by remember { mutableStateOf(false) }
     var showHtmlPreview by remember { mutableStateOf(false) }
     var showBuildManager by remember { mutableStateOf(false) }
+    var showTaskCenter by remember { mutableStateOf(false) }
+    var showGitHubHub by remember { mutableStateOf(false) }
+    var showParallelReviewReport by remember { mutableStateOf(false) }
+    var parallelReviewBusy by remember { mutableStateOf(false) }
+    var parallelReviewResults by remember { mutableStateOf<List<ParallelReviewResult>>(emptyList()) }
     var confirmClearHistory by remember { mutableStateOf(false) }
     var showConversationList by remember { mutableStateOf(false) }
     var renameConversationId by remember { mutableStateOf<String?>(null) }
@@ -92,7 +125,9 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var deletingConversationId by remember { mutableStateOf<String?>(null) }
     var confirmDeleteKey by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var testingConnection by remember { mutableStateOf(false) }
     var transferBusy by remember { mutableStateOf(false) }
+    var pendingZipUri by remember { mutableStateOf<Uri?>(null) }
     var activeJob by remember { mutableStateOf<Job?>(null) }
     var status by remember { mutableStateOf("API هنوز پیکربندی نشده است.") }
     val historyStore = remember(context) { MultiConversationStore(context) }
@@ -103,12 +138,38 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var approvalPath by remember { mutableStateOf<String?>(null) }
     var approvalPreview by remember { mutableStateOf("") }
     var approvalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
+    var buildApprovalTask by remember { mutableStateOf<String?>(null) }
+    var buildApprovalDecision by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     val scope = rememberCoroutineScope()
     val client = remember { LlmClient() }
-    val workspaceDirectory = remember(context) { File(context.filesDir, "workspace") }
-    val transfer = remember(context) { ProjectTransfer(context, workspaceDirectory) }
-    val runtime = remember(context) {
-        AgentRuntime(ToolRegistry(WorkspaceTools(workspaceDirectory)))
+    val connectionTester = remember { ApiConnectionTester() }
+    val chatListState = rememberLazyListState()
+    val projectStore = remember(context) { ProjectStore(context) }
+    val workQueueStore = remember(context) { WorkQueueStore(context) }
+    var projects by remember(projectStore) { mutableStateOf(projectStore.loadProjects()) }
+    var activeProjectId by remember(projectStore) { mutableStateOf(projectStore.activeProjectId()) }
+    var workItems by remember(workQueueStore, activeProjectId) { mutableStateOf(workQueueStore.list(activeProjectId)) }
+    val activeProject = projects.firstOrNull { it.id == activeProjectId }
+    val activeProjectName = activeProject?.name ?: "پروژه من"
+    val workspaceDirectory = remember(context, activeProjectId) { projectStore.directory(activeProjectId) }
+    val workspaceTools = remember(workspaceDirectory) { WorkspaceTools(workspaceDirectory) }
+    val transfer = remember(context, activeProjectId) { ProjectTransfer(context, workspaceDirectory) }
+    val buildService = remember(context, keys) { BuildProjectService(context, keys) }
+    val runtime = remember(workspaceTools, buildService, workQueueStore, activeProjectId) {
+        AgentRuntime(ToolRegistry(
+            workspaceTools,
+            buildProject = { task, report -> buildService.build(workspaceDirectory, task, report) },
+            createPlanStep = { title, details ->
+                val item = workQueueStore.addPlanStep(activeProjectId, title, details)
+                withContext(Dispatchers.Main.immediate) { workItems = workQueueStore.list(activeProjectId) }
+                org.json.JSONObject().put("ok", true).put("id", item.id).put("title", item.title)
+            },
+            queuePrompt = { queuedPrompt ->
+                val item = workQueueStore.addPrompt(activeProjectId, queuedPrompt)
+                withContext(Dispatchers.Main.immediate) { workItems = workQueueStore.list(activeProjectId) }
+                org.json.JSONObject().put("ok", true).put("id", item.id).put("title", item.title)
+            }
+        ))
     }
     val lines = remember(historyStore, activeConversationId) {
         mutableStateListOf<LiveLine>().apply {
@@ -116,6 +177,9 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             addAll(selected?.messages.orEmpty().map { LiveLine(it.role, it.content) })
             if (isEmpty()) add(LiveLine("assistant", "سلام. گفتگوی جدید آماده است؛ درخواستت را بنویس."))
         }
+    }
+    LaunchedEffect(lines.size, lines.lastOrNull()?.text, busy) {
+        if (lines.isNotEmpty()) chatListState.animateScrollToItem(lines.lastIndex)
     }
     val htmlPreview = lines.lastOrNull { it.role == "assistant" }?.text?.let { message ->
         Regex("""(?is)```(?:html)?\s*(.*?)```""").find(message)?.groupValues?.get(1)?.trim()
@@ -133,12 +197,16 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             try {
                 context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 val result = transfer.importTree(uri)
-                status = "پروژه با موفقیت جایگزین شد: ${result.files} فایل"
+                status = "پروژه «" + activeProjectName + "» به‌روزرسانی شد: ${result.files} فایل"
+                projects = projectStore.loadProjects()
                 Toast.makeText(context, status, Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 status = "خطای ورود پروژه: ${e.message ?: "نامشخص"}"
             } finally { transferBusy = false }
         }
+    }
+    val zipImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) pendingZipUri = uri
     }
     val attachmentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
@@ -200,114 +268,348 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Column { Text("Android Code Agent"); Text("${config.provider} · ${config.model}", style = MaterialTheme.typography.labelSmall) } },
+                title = {
+                    Column {
+                        Text("Android Code Agent", style = MaterialTheme.typography.titleMedium)
+                        Text(activeProjectName + " · " + activeConversationTitle + " · " + config.model, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                    }
+                },
                 actions = {
-                    IconButton(onClick = { showConversationList = true }, enabled = !busy) { Icon(Icons.Default.Forum, "فهرست گفتگوها") }
-                    IconButton(onClick = { importLauncher.launch(null) }, enabled = !transferBusy) { Icon(Icons.Default.FolderOpen, "وارد کردن پوشه پروژه") }
-                    IconButton(onClick = { showWorkspace = true }) { Icon(Icons.Default.Folder, "مرور و ویرایش فایل‌های پروژه") }
-                    IconButton(onClick = { showHtmlPreview = true }, enabled = !htmlPreview.isNullOrBlank()) { Icon(Icons.Default.Code, "پیش‌نمایش HTML") }
-                    IconButton(onClick = { showBuildManager = true }) { Icon(Icons.Default.Build, "مدیریت ساخت APK") }
-                    IconButton(onClick = { confirmClearHistory = true }, enabled = !busy) { Icon(Icons.Default.Delete, "پاک کردن تاریخچه گفتگو") }
-                    IconButton(onClick = { exportLauncher.launch("android-code-agent-project.zip") }, enabled = !transferBusy) { Icon(Icons.Default.Archive, "خروجی ZIP پروژه") }
-                    IconButton(onClick = { provider=config.provider; model=config.model; endpoint=config.baseUrl; apiKey=""; settings=true }) { Icon(Icons.Default.Settings, "تنظیمات") }
+                    IconButton(
+                        onClick = {
+                            persistHistory()
+                            val created = historyStore.create()
+                            conversations = historyStore.loadAll()
+                            activeConversationId = created.id
+                            prompt = ""
+                            pendingImageData = null
+                            pendingImageMime = null
+                            pendingAttachmentName = null
+                            selectedTab = MainTab.CHAT
+                            status = "گفتگوی جدید آماده است."
+                        },
+                        enabled = !busy
+                    ) { Icon(Icons.Default.Add, "گفتگوی جدید") }
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, "ابزارهای پروژه") }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(text = { Text("گفتگوها") }, leadingIcon = { Icon(Icons.Default.Forum, null) }, onClick = { menuExpanded = false; showConversationList = true })
+                            DropdownMenuItem(text = { Text("صف کارها و برنامه پروژه") }, leadingIcon = { Icon(Icons.Default.History, null) }, onClick = { menuExpanded = false; workItems = workQueueStore.list(activeProjectId); showTaskCenter = true })
+                            DropdownMenuItem(text = { Text("اتصال GitHub و مدیریت PR") }, leadingIcon = { Icon(Icons.Default.Code, null) }, onClick = { menuExpanded = false; showGitHubHub = true })
+                            DropdownMenuItem(text = { Text(if (parallelReviewBusy) "بررسی موازی در حال اجرا..." else "بررسی موازی با ۳ ایجنت") }, leadingIcon = { Icon(Icons.Default.Code, null) }, enabled = !parallelReviewBusy && !busy, onClick = {
+                                menuExpanded = false
+                                val secret = keys.read(config.provider)
+                                if (secret.isNullOrBlank()) { status = "برای بررسی موازی ابتدا کلید API را تنظیم کن."; settings = true }
+                                else scope.launch {
+                                    parallelReviewBusy = true
+                                    parallelReviewResults = emptyList()
+                                    status = "سه ایجنت در محیط‌های جداگانه در حال بررسی فقط‌خواندنی هستند..."
+                                    try {
+                                        parallelReviewResults = ParallelReviewCoordinator(context.cacheDir).review(workspaceDirectory, config, secret) { event ->
+                                            withContext(Dispatchers.Main.immediate) {
+                                                agentEvents.add(event)
+                                                if (agentEvents.size > 80) agentEvents.removeAt(0)
+                                            }
+                                        }
+                                        showParallelReviewReport = true
+                                        status = "بررسی موازی به پایان رسید؛ گزارش‌ها آماده‌اند."
+                                    } catch (e: Exception) {
+                                        status = "بررسی موازی ناموفق بود: " + (e.message ?: "خطای نامشخص")
+                                    } finally { parallelReviewBusy = false }
+                                }
+                            })
+                            DropdownMenuItem(text = { Text("وارد کردن پروژه") }, leadingIcon = { Icon(Icons.Default.FolderOpen, null) }, onClick = { menuExpanded = false; importLauncher.launch(null) })
+                            DropdownMenuItem(text = { Text("فایل‌های پروژه") }, leadingIcon = { Icon(Icons.Default.Folder, null) }, onClick = { menuExpanded = false; showWorkspace = true })
+                            DropdownMenuItem(text = { Text("پیش‌نمایش HTML") }, leadingIcon = { Icon(Icons.Default.Code, null) }, enabled = !htmlPreview.isNullOrBlank(), onClick = { menuExpanded = false; showHtmlPreview = true })
+                            DropdownMenuItem(text = { Text("ساخت APK") }, leadingIcon = { Icon(Icons.Default.Build, null) }, onClick = { menuExpanded = false; showBuildManager = true })
+                            DropdownMenuItem(text = { Text("خروجی ZIP پروژه") }, leadingIcon = { Icon(Icons.Default.Archive, null) }, onClick = { menuExpanded = false; exportLauncher.launch("android-code-agent-project.zip") })
+                            DropdownMenuItem(text = { Text("پاک کردن گفتگو") }, leadingIcon = { Icon(Icons.Default.Delete, null) }, onClick = { menuExpanded = false; confirmClearHistory = true })
+                            DropdownMenuItem(text = { Text("تنظیمات") }, leadingIcon = { Icon(Icons.Default.Settings, null) }, onClick = { menuExpanded = false; provider=config.provider; model=config.model; endpoint=config.baseUrl; apiKey=""; settings=true })
+                        }
+                    }
                 }
             )
         },
         bottomBar = {
-            Row(Modifier.fillMaxWidth().imePadding().padding(10.dp), verticalAlignment=Alignment.CenterVertically) {
-                OutlinedTextField(prompt, { prompt=it }, Modifier.weight(1f), placeholder={ Text("درخواست برنامه‌نویسی...") }, maxLines=4)
-                Spacer(Modifier.width(8.dp))
-                FilledIconButton(onClick={
-                    if (busy) {
-                        activeJob?.cancel()
-                        status = "درخواست لغو شد."
-                    } else {
-                    val question=prompt.trim()
-                    if(question.isNotEmpty()) {
-                        val secret=keys.read(config.provider)
-                        if(secret.isNullOrBlank()) { status="کلید API ثبت نشده است."; settings=true }
-                        else {
-                            prompt=""
-                            lines.add(LiveLine("user",question))
-                            lines.add(LiveLine("assistant",""))
-                            persistHistory()
-                            busy=true
-                            status="در حال پردازش درخواست..."
-                            val history = lines.dropLast(1).map { ChatMessage(it.role, it.text) }.toMutableList()
-                            val userIndex = history.indexOfLast { it.role == "user" }
-                            if (userIndex >= 0 && pendingImageData != null && pendingImageMime != null) {
-                                history[userIndex] = ChatMessage("user", question + "\n[[IMAGE:" + pendingImageMime + ":" + pendingImageData + "]]")
-                            }
-                            pendingImageData = null
-                            pendingImageMime = null
-                            pendingAttachmentName = null
-                            activeJob = scope.launch {
-                                try {
-                                    val result = runtime.run(
-                                        config = config,
-                                        apiKey = secret,
-                                        conversation = listOf("system" to AGENT_SYSTEM_PROMPT.trimIndent()) + history.map { it.role to it.content },
-                                        onText = { chunk ->
-                                            withContext(Dispatchers.Main.immediate) {
-                                                if (lines.isNotEmpty()) {
-                                                    val current = lines.last()
-                                                    lines[lines.lastIndex] = LiveLine("assistant", current.text + chunk)
-                                                }
-                                            }
-                                        },
-                                        approveWrite = { path, content ->
-                                            val gate = CompletableDeferred<Boolean>()
-                                            approvalPath = path
-                                            approvalPreview = content.take(800)
-                                            approvalDecision = gate
-                                            try { gate.await() } finally {
-                                                approvalPath = null
-                                                approvalPreview = ""
-                                                approvalDecision = null
-                                            }
-                                        }
-                                    )
-                                    val toolSummary = if (result.toolLog.isEmpty()) "" else
-                                        "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
-                                    lines[lines.lastIndex]=LiveLine("assistant",result.answer + toolSummary)
-                                    persistHistory()
-                                    status="درخواست به پایان رسید."
-                                } catch(e: CancellationException) {
-                                    persistHistory()
-                                    status = "درخواست لغو شد."
-                                } catch(e:Exception) {
-                                    lines[lines.lastIndex]=LiveLine("assistant","خطا: ${e.message ?: "نامشخص"}")
-                                    persistHistory()
-                                    status="درخواست ناموفق بود؛ مدل، کلید، endpoint و پشتیبانی ابزارها را بررسی کن."
-                                } finally { busy=false; activeJob=null }
+            if (selectedTab == MainTab.CHAT) Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 4.dp) {
+                Column(
+                    Modifier.fillMaxWidth().imePadding().padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = if (busy) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (busy) CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)
+                                else Icon(Icons.Default.Folder, null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (busy) "ایجنت در حال کار است" else "پروژه · " + activeProjectName, style = MaterialTheme.typography.labelSmall)
                             }
                         }
+                        Spacer(Modifier.weight(1f))
+                        Text(status, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AssistChip(onClick = { showWorkspace = true }, label = { Text("فایل‌ها") }, leadingIcon = { Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(16.dp)) })
+                        AssistChip(onClick = { showBuildManager = true }, label = { Text("ساخت APK") }, leadingIcon = { Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp)) })
+                        AssistChip(onClick = { showConversationList = true }, label = { Text("گفتگوها") }, leadingIcon = { Icon(Icons.Default.Forum, null, modifier = Modifier.size(16.dp)) })
                     }
-                }, enabled=(prompt.isNotBlank() && !busy) || busy) {
-                    if(busy) Icon(Icons.Default.Close,"لغو درخواست") else Icon(Icons.Default.Send,"ارسال")
+                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        IconButton(onClick = { attachmentLauncher.launch(arrayOf("*/*")) }, enabled = !busy) {
+                            Icon(Icons.Default.AttachFile, "افزودن فایل")
+                        }
+                        OutlinedTextField(
+                            value = prompt,
+                            onValueChange = { prompt = it },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("درخواست برنامه‌نویسی...") },
+                            maxLines = 5,
+                            shape = RoundedCornerShape(22.dp)
+                        )
+                        FilledIconButton(
+                            onClick = {
+                                if (busy) {
+                                    activeJob?.cancel()
+                                    status = "درخواست لغو شد."
+                                } else {
+                                    val question = prompt.trim()
+                                    if (question.isNotEmpty()) {
+                                        val secret = keys.read(config.provider)
+                                        if (secret.isNullOrBlank()) {
+                                            status = "کلید API ثبت نشده است."
+                                            settings = true
+                                        } else {
+                                            prompt = ""
+                                            lines.add(LiveLine("user", question))
+                                            lines.add(LiveLine("assistant", ""))
+                                            persistHistory()
+                                            busy = true
+                                            agentEvents.add("شروع درخواست: " + question.take(90))
+                                            status = "در حال پردازش درخواست..."
+                                            val history = lines.dropLast(1).map { ChatMessage(it.role, it.text) }.toMutableList()
+                                            val userIndex = history.indexOfLast { it.role == "user" }
+                                            if (userIndex >= 0 && pendingImageData != null && pendingImageMime != null) {
+                                                history[userIndex] = ChatMessage("user", question + "\n[[IMAGE:" + pendingImageMime + ":" + pendingImageData + "]]")
+                                            }
+                                            pendingImageData = null
+                                            pendingImageMime = null
+                                            pendingAttachmentName = null
+                                            activeJob = scope.launch {
+                                                try {
+                                                    val result = runtime.run(
+                                                        config = config,
+                                                        apiKey = secret,
+                                                        conversation = listOf("system" to AGENT_SYSTEM_PROMPT.trimIndent()) + history.map { it.role to it.content },
+                                                        onText = { chunk ->
+                                                            withContext(Dispatchers.Main.immediate) {
+                                                                if (lines.isNotEmpty()) {
+                                                                    val current = lines.last()
+                                                                    lines[lines.lastIndex] = LiveLine("assistant", visibleAssistantText(current.text + chunk))
+                                                                }
+                                                            }
+                                                        },
+                                                        onActivity = { event ->
+                                                            withContext(Dispatchers.Main.immediate) {
+                                                                agentEvents.add(event)
+                                                                status = when {
+                                                                    event.startsWith("درخواست به مدل ارسال شد") -> "مدل در حال فکر کردن و تولید پاسخ زنده است..."
+                                                                    event.startsWith("اجرای ابزار:") -> event
+                                                                    else -> event
+                                                                }
+                                                                if (agentEvents.size > 80) agentEvents.removeAt(0)
+                                                                if (event.contains("APK ساخته و دریافت شد")) buildOutput = event + "\nفایل خروجی در بخش ساخت APK آماده ذخیره است."
+                                                                if (event.startsWith("وضعیت ساخت:")) buildStatus = event
+                                                                if (buildApprovalTask != null) buildLog = (buildLog + "\n" + event).takeLast(12000)
+                                                            }
+                                                        },
+                                                        approveWrite = { path, content ->
+                                                            val gate = CompletableDeferred<Boolean>()
+                                                            approvalPath = path
+                                                            val currentContent = runCatching { workspaceTools.readFile(path) }.getOrDefault("")
+                                                            approvalPreview = runCatching { TextDiff.create(currentContent, content) }
+                                                                .getOrElse { "نمایش تفاوت ممکن نشد: ${it.message ?: "خطای نامشخص"}\n\nمحتوای پیشنهادی:\n$content" }
+                                                                .take(12000)
+                                                            approvalDecision = gate
+                                                            try { gate.await() } finally {
+                                                                approvalPath = null
+                                                                approvalPreview = ""
+                                                                approvalDecision = null
+                                                            }
+                                                        },
+                                                        approveBuild = { task ->
+                                                            val gate = CompletableDeferred<Boolean>()
+                                                            buildApprovalTask = task
+                                                            buildApprovalDecision = gate
+                                                            try { gate.await() } finally {
+                                                                buildApprovalTask = null
+                                                                buildApprovalDecision = null
+                                                            }
+                                                        }
+                                                    )
+                                                    val toolSummary = if (result.toolLog.isEmpty()) "" else "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
+                                                    result.toolLog.forEach { agentEvents.add(it) }
+                                                    agentEvents.add("پاسخ ایجنت دریافت و ذخیره شد.")
+                                                    lines[lines.lastIndex] = LiveLine("assistant", visibleAssistantText(result.answer) + toolSummary)
+                                                    persistHistory()
+                                                    status = "درخواست به پایان رسید."
+                                                } catch (e: CancellationException) {
+                                                    persistHistory()
+                                                    status = "درخواست لغو شد."
+                                                } catch (e: Exception) {
+                                                    lines[lines.lastIndex] = LiveLine("assistant", "خطا: " + (e.message ?: "نامشخص"))
+                                                    persistHistory()
+                                                    agentEvents.add("خطا: " + (e.message ?: "نامشخص"))
+                                                    status = "درخواست ناموفق بود؛ مدل، کلید، endpoint و پشتیبانی ابزارها را بررسی کن."
+                                                } finally {
+                                                    busy = false
+                                                    activeJob = null
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = (prompt.isNotBlank() && !busy) || busy
+                        ) {
+                            if (busy) Icon(Icons.Default.Close, "لغو درخواست")
+                            else Icon(Icons.Default.Send, "ارسال")
+                        }
+                    }
+                    if (pendingAttachmentName != null) {
+                        Text("پیوست آماده: $pendingAttachmentName", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                    }
                 }
             }
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            Text(status, Modifier.fillMaxWidth().padding(horizontal=14.dp, vertical=8.dp), style=MaterialTheme.typography.bodySmall)
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding=PaddingValues(12.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                itemsIndexed(lines) { index, line ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement=if(line.role=="user") Arrangement.End else Arrangement.Start) {
-                        Surface(color=if(line.role=="user") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, shape=RoundedCornerShape(16.dp), modifier=Modifier.widthIn(max=340.dp)) {
-                            Text(if(line.text.isBlank() && busy) "در حال دریافت پاسخ..." else line.text, Modifier.padding(12.dp))
+            when (selectedTab) {
+                MainTab.CHAT -> {
+                    LazyColumn(state = chatListState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding=PaddingValues(12.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                        itemsIndexed(lines) { index, line ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement=if(line.role=="user") Arrangement.End else Arrangement.Start) {
+                                Surface(color=if(line.role=="user") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant, shape=RoundedCornerShape(16.dp), modifier=Modifier.widthIn(max=340.dp)) {
+                                    Text(if(line.text.isBlank() && busy) "در حال فکرکردن و دریافت پاسخ زنده..." else line.text, Modifier.padding(12.dp))
+                                }
+                                MessageActions(text = line.text, editable = line.role == "user") {
+                                    prompt = line.text
+                                    lines.subList(index, lines.size).clear()
+                                    persistHistory()
+                                    status = "پیام برای ویرایش به کادر نوشتن منتقل شد."
+                                }
+                            }
                         }
-                        MessageActions(text = line.text, editable = line.role == "user") {
-                            prompt = line.text
-                            lines.subList(index, lines.size).clear()
-                            persistHistory()
-                            status = "پیام برای ویرایش به کادر نوشتن منتقل شد."
+                    }
+                    Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal=10.dp, vertical=6.dp)) {
+                            Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                                listOf("activity" to "فعالیت ایجنت", "terminal" to "ترمینال", "build" to "گزارش ساخت", "output" to "خروجی APK").forEach { (key,label) ->
+                                    FilterChip(selected=activityPanel==key,onClick={activityPanel=key},label={Text(label)})
+                                }
+                            }
+                            when(activityPanel) {
+                                "activity" -> {
+                                    Text(if(busy) "● ایجنت مشغول است" else "● آماده", color=if(busy) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary, style=MaterialTheme.typography.labelMedium)
+                                    agentEvents.takeLast(4).forEach { Text(it, style=MaterialTheme.typography.bodySmall, maxLines=1) }
+                                }
+                                "terminal" -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("ترمینال امن Gradle به محیط Android SDK متصل می‌شود. فقط دستورهای مجاز اجرا می‌شوند.", style = MaterialTheme.typography.bodySmall)
+                                    Text(buildStatus, style = MaterialTheme.typography.bodySmall)
+                                    Button(onClick = { showBuildManager = true }, modifier = Modifier.fillMaxWidth()) { Text("باز کردن ترمینال و Android SDK") }
+                                }
+                                "build" -> {
+                                    Text(buildStatus, style=MaterialTheme.typography.bodySmall)
+                                    if(buildLog.isNotBlank()) Text(buildLog.takeLast(900), style=MaterialTheme.typography.bodySmall, maxLines=5)
+                                }
+                                "output" -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(buildOutput, style = MaterialTheme.typography.bodySmall)
+                                    Button(onClick = { showBuildManager = true }, modifier = Modifier.fillMaxWidth()) { Text("مشاهده و ذخیره خروجی APK") }
+                                }
+                            }
                         }
                     }
                 }
+                MainTab.PROJECTS -> ProjectHomeScreen(
+                    workspaceDirectory = workspaceDirectory,
+                    projects = projects,
+                    activeProjectId = activeProjectId,
+                    onSelectProject = { project ->
+                        projectStore.activate(project.id)
+                        activeProjectId = project.id
+                        projects = projectStore.loadProjects()
+                        status = "پروژه فعال شد: " + project.name
+                    },
+                    onCreateProject = { name -> runCatching {
+                        val created = projectStore.create(name)
+                        activeProjectId = created.id
+                        projects = projectStore.loadProjects()
+                        status = "پروژه ساخته شد: " + created.name
+                    }.onFailure { status = "خطای ساخت پروژه: " + (it.message ?: "نامشخص") } },
+                    onRenameProject = { project, name -> runCatching {
+                        projectStore.rename(project.id, name)
+                        projects = projectStore.loadProjects()
+                        status = "نام پروژه ذخیره شد."
+                    }.onFailure { status = "خطای تغییر نام: " + (it.message ?: "نامشخص") } },
+                    onDeleteProject = { project -> runCatching {
+                        projectStore.delete(project.id)
+                        activeProjectId = projectStore.activeProjectId()
+                        projects = projectStore.loadProjects()
+                        status = "پروژه حذف شد."
+                    }.onFailure { status = "خطای حذف پروژه: " + (it.message ?: "نامشخص") } },
+                    onImport = { importLauncher.launch(null) },
+                    onImportZip = { zipImportLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
+                    onBrowse = { showWorkspace = true },
+                    onBuild = { showBuildManager = true },
+                    onExport = { exportLauncher.launch("android-code-agent-project.zip") }
+                )
+                MainTab.HISTORY -> HistoryHomeScreen(
+                    conversations=conversations, activeId=activeConversationId,
+                    onNew={
+                        persistHistory()
+                        val created=historyStore.create()
+                        conversations=historyStore.loadAll()
+                        activeConversationId=created.id
+                        prompt=""
+                        selectedTab=MainTab.CHAT
+                    },
+                    onOpen={ item ->
+                        if(item.id!=activeConversationId) {
+                            persistHistory()
+                            activeConversationId=item.id
+                            prompt=""
+                            pendingImageData=null
+                            pendingImageMime=null
+                            pendingAttachmentName=null
+                        }
+                        selectedTab=MainTab.CHAT
+                        status="گفتگوی " + item.title + " باز شد."
+                    },
+                    onRename={ item -> renameConversationId=item.id; renameConversationText=item.title },
+                    onDelete={ item -> deletingConversationId=item.id }
+                )
+                MainTab.SETTINGS -> SettingsHomeScreen(
+                    provider=config.provider, model=config.model, endpoint=config.baseUrl,
+                    hasKey=keys.hasKey(config.provider), profilesCount=profiles.size,
+                    onOpenSettings={
+                        provider=config.provider
+                        model=config.model
+                        endpoint=config.baseUrl
+                        apiKey=""
+                        settings=true
+                    },
+                    onBuild={ showBuildManager=true }
+                )
+            }
+            NavigationBar {
+                NavigationBarItem(selected=selectedTab==MainTab.CHAT,onClick={selectedTab=MainTab.CHAT},icon={Icon(Icons.Default.Home,null)},label={Text("چت")})
+                NavigationBarItem(selected=selectedTab==MainTab.PROJECTS,onClick={selectedTab=MainTab.PROJECTS},icon={Icon(Icons.Default.FolderOpen,null)},label={Text("پروژه‌ها")})
+                NavigationBarItem(selected=selectedTab==MainTab.HISTORY,onClick={selectedTab=MainTab.HISTORY},icon={Icon(Icons.Default.History,null)},label={Text("تاریخچه")})
+                NavigationBarItem(selected=selectedTab==MainTab.SETTINGS,onClick={selectedTab=MainTab.SETTINGS},icon={Icon(Icons.Default.Settings,null)},label={Text("تنظیمات")})
             }
         }
+
     }
 
     if (showConversationList) {
@@ -416,9 +718,75 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         )
     }
 
+    pendingZipUri?.let { selectedZip ->
+        AlertDialog(
+            onDismissRequest = { pendingZipUri = null },
+            title = { Text("جایگزینی پروژه با ZIP؟") },
+            text = { Text("محتوای پروژهٔ فعال «$activeProjectName» با فایل ZIP انتخاب‌شده جایگزین می‌شود. ابتدا آرشیو در فضای موقت بررسی می‌شود؛ اگر استخراج ناموفق باشد، پروژهٔ قبلی حفظ می‌شود. فقط فایل ZIP مورد اعتماد خودت را انتخاب کن.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingZipUri = null
+                    scope.launch {
+                        transferBusy = true
+                        status = "در حال بررسی و وارد کردن ZIP..."
+                        try {
+                            val result = transfer.importZip(selectedZip)
+                            status = "ورود ZIP موفق بود: ${result.files} فایل، ${result.bytes / 1024} کیلوبایت"
+                            projects = projectStore.loadProjects()
+                            Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                        } catch (e: Exception) {
+                            status = "خطای ورود ZIP: ${e.message ?: "نامشخص"}"
+                            Toast.makeText(context, status, Toast.LENGTH_LONG).show()
+                        } finally { transferBusy = false }
+                    }
+                }) { Text("جایگزینی و وارد کردن") }
+            },
+            dismissButton = { TextButton(onClick = { pendingZipUri = null }) { Text("انصراف") } }
+        )
+    }
+
+    if (showGitHubHub) GitHubHubDialog(keys = keys, onDismiss = { showGitHubHub = false }, onStatus = { status = it })
+
+    if (showTaskCenter) TaskCenterDialog(
+        items = workItems,
+        onAddPrompt = { value ->
+            runCatching { workQueueStore.addPrompt(activeProjectId, value) }
+                .onSuccess { workItems = workQueueStore.list(activeProjectId); status = "درخواست به صف ذخیره شد." }
+                .onFailure { status = "ذخیره درخواست ناموفق بود: " + (it.message ?: "خطای نامشخص") }
+        },
+        onAddPlanStep = { title, details ->
+            runCatching { workQueueStore.addPlanStep(activeProjectId, title, details) }
+                .onSuccess { workItems = workQueueStore.list(activeProjectId); status = "مرحله به برنامه پروژه اضافه شد." }
+                .onFailure { status = "افزودن مرحله ناموفق بود: " + (it.message ?: "خطای نامشخص") }
+        },
+        onToggle = { item, checked -> workQueueStore.setCompleted(item.id, checked); workItems = workQueueStore.list(activeProjectId) },
+        onRemove = { item -> workQueueStore.remove(item.id); workItems = workQueueStore.list(activeProjectId) },
+        onUsePrompt = { item ->
+            val queued = workQueueStore.readPrompt(item.id)
+            if (queued != null) { prompt = queued; showTaskCenter = false; selectedTab = MainTab.CHAT; status = "درخواست به کادر چت منتقل شد و تا حذف دستی در صف باقی می‌ماند." }
+        },
+        onDismiss = { showTaskCenter = false }
+    )
+
+    if (showParallelReviewReport) AlertDialog(
+        onDismissRequest = { showParallelReviewReport = false },
+        title = { Text("گزارش بررسی موازی") },
+        text = {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("سه ایجنت در snapshotهای جدا و فقط‌خواندنی کار کردند. هیچ فایلی در پروژه اصلی تغییر نکرد.", style = MaterialTheme.typography.bodySmall)
+                parallelReviewResults.forEach { result ->
+                    Text(result.role, style = MaterialTheme.typography.titleSmall)
+                    Text(result.error?.let { "خطا: " + it } ?: result.report, style = MaterialTheme.typography.bodySmall)
+                    HorizontalDivider()
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showParallelReviewReport = false }) { Text("بستن گزارش") } }
+    )
+
     if (showWorkspace) WorkspaceBrowser(workspaceDirectory) { showWorkspace = false }
     if (showHtmlPreview && !htmlPreview.isNullOrBlank()) HtmlPreviewDialog(htmlPreview, onDismiss = { showHtmlPreview = false })
-    if (showBuildManager) BuildManagerDialog(keys = keys, onDismiss = { showBuildManager = false })
+    if (showBuildManager) BuildManagerDialog(keys = keys, onDismiss = { showBuildManager = false }, onBuildStatus = { buildStatus = it }, onBuildLog = { buildLog = it }, onBuildOutput = { buildOutput = it })
 
     if (confirmClearHistory) {
         AlertDialog(
@@ -451,11 +819,40 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
         )
     }
 
+    if (buildApprovalTask != null) {
+        AlertDialog(
+            onDismissRequest = { buildApprovalDecision?.complete(false) },
+            title = { Text("تأیید اجرای دستور ساخت") },
+            text = { Text("دستور Gradle: $buildApprovalTask\n\nپروژه برای ساخت به سرویس ابری پیکربندی‌شده ارسال می‌شود و داخل Docker محدود با Android SDK اجرا خواهد شد. اسکریپت‌های Gradle پروژه اجرا می‌شوند و برای دریافت وابستگی‌ها دسترسی شبکه دارند؛ هیچ کلید API یا رمز امضایی را داخل پروژه قرار نده.") },
+            confirmButton = { TextButton(onClick = { buildApprovalDecision?.complete(true) }) { Text("تأیید و اجرا") } },
+            dismissButton = { TextButton(onClick = { buildApprovalDecision?.complete(false) }) { Text("لغو") } }
+        )
+    }
+
     if (approvalPath != null) {
         AlertDialog(
             onDismissRequest = { approvalDecision?.complete(false) },
             title = { Text("اجازهٔ تغییر فایل؟") },
-            text = { Text("مسیر: $approvalPath\\n\\nپیش‌نمایش محتوا (حداکثر ۸۰۰ نویسه):\\n$approvalPreview\\n\\nاگر مسیر و محتوا را بررسی نکرده‌ای، رد کن.") },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("مسیر فایل: $approvalPath", style = MaterialTheme.typography.titleSmall)
+                    Text("تغییرات دقیق پیشنهادی (نسخه فعلی در برابر نسخه جدید):", style = MaterialTheme.typography.bodySmall)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            approvalPreview,
+                            Modifier.fillMaxWidth().padding(10.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Text("فقط در صورت درست بودن مسیر و تغییرات، نوشتن را تأیید کن.", style = MaterialTheme.typography.bodySmall)
+                }
+            },
             confirmButton = { TextButton(onClick = { approvalDecision?.complete(true) }) { Text("تأیید نوشتن") } },
             dismissButton = { TextButton(onClick = { approvalDecision?.complete(false) }) { Text("رد") } }
         )
@@ -492,9 +889,33 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                     Text("provider: openai / anthropic / compatible", style=MaterialTheme.typography.labelSmall)
                     OutlinedTextField(provider,{provider=it.trim().lowercase()},label={Text("Provider ID")},singleLine=true)
                     OutlinedTextField(model,{model=it},label={Text("Model")},singleLine=true)
-                    OutlinedTextField(endpoint,{endpoint=it},label={Text("Base URL (HTTPS)")},singleLine=true)
+                    OutlinedTextField(endpoint,{endpoint=it},label={Text("Base URL یا endpoint کامل (HTTPS)")},singleLine=true)
                     OutlinedTextField(apiKey,{apiKey=it},label={Text("API Key")},visualTransformation=PasswordVisualTransformation(),keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Password),singleLine=true)
                     Text("کلید با Android Keystore رمزنگاری می‌شود. ابزارهای عامل از APIهای سازگار با OpenAI و Anthropic Messages پشتیبانی می‌کنند.", style=MaterialTheme.typography.bodySmall)
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                testingConnection = true
+                                status = "در حال آزمایش واقعی اتصال API..."
+                                try {
+                                    val candidate = ProviderConfig(provider.trim(), model.trim(), endpoint.trim())
+                                    val secret = apiKey.trim().ifBlank { keys.read(candidate.provider).orEmpty() }
+                                    require(secret.isNotBlank()) { "ابتدا کلید API را وارد کن." }
+                                    status = connectionTester.test(candidate, secret)
+                                } catch (error: Exception) {
+                                    status = "آزمایش اتصال ناموفق بود: " + (error.message ?: "خطای نامشخص")
+                                } finally {
+                                    testingConnection = false
+                                }
+                            }
+                        },
+                        enabled = !testingConnection && provider.isNotBlank() && model.isNotBlank() && endpoint.isNotBlank()
+                    ) {
+                        if (testingConnection) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (testingConnection) "در حال آزمایش..." else "آزمایش اتصال API")
+                    }
+                    Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
                     TextButton(onClick = { confirmDeleteKey = true }, enabled = keys.hasKey(config.provider)) { Text("حذف کلید ذخیره‌شده این سرویس") }
                 }
             },

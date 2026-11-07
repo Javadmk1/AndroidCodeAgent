@@ -20,9 +20,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.zip.ZipFile
 
 @Composable
-fun BuildManagerDialog(keys: SecureKeyStore, onDismiss: () -> Unit) {
+fun BuildManagerDialog(
+    keys: SecureKeyStore,
+    onDismiss: () -> Unit,
+    onBuildStatus: (String) -> Unit = {},
+    onBuildLog: (String) -> Unit = {},
+    onBuildOutput: (String) -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val client = remember(context) { CloudBuildClient(context) }
@@ -31,15 +38,37 @@ fun BuildManagerDialog(keys: SecureKeyStore, onDismiss: () -> Unit) {
     var branch by remember { mutableStateOf("main") }
     var projectFolder by remember { mutableStateOf(".") }
     var task by remember { mutableStateOf("assembleDebug") }
+    var taskMenu by remember { mutableStateOf(false) }
+    var sdkInfo by remember { mutableStateOf("محیط Android SDK هنوز بررسی نشده است.") }
     var cloudEndpoint by remember { mutableStateOf(prefs.getString("endpoint", "") ?: "") }
     var cloudToken by remember { mutableStateOf(keys.read("cloud_builder") ?: "") }
     var cloudProjectDir by remember { mutableStateOf(".") }
     var zipUri by remember { mutableStateOf<Uri?>(null) }
     var buildId by remember { mutableStateOf<String?>(null) }
-    var artifactFile by remember { mutableStateOf<File?>(null) }
+    var artifactFile by remember { mutableStateOf(File(context.cacheDir, "last-cloud-build.zip").takeIf { it.isFile }) }
+    var apkEntries by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedApk by remember { mutableStateOf<String?>(null) }
+    var apkMenu by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("سرویس ابری هنوز پیکربندی نشده است.") }
     var buildLog by remember { mutableStateOf("") }
+    var artifactSummary by remember { mutableStateOf("") }
+
+    LaunchedEffect(status) { onBuildStatus(status) }
+    LaunchedEffect(buildLog) { onBuildLog(buildLog) }
+    LaunchedEffect(artifactFile) {
+        artifactFile?.let { file ->
+            artifactSummary = runCatching {
+                ZipFile(file).use { zip ->
+                    val entries = zip.entries().asSequence().filter { !it.isDirectory && it.name.endsWith(".apk", true) }.toList()
+                    apkEntries = entries.map { it.name }
+                    if (selectedApk !in apkEntries) selectedApk = apkEntries.firstOrNull()
+                    if (entries.isEmpty()) "در ZIP فایل APK پیدا نشد." else entries.joinToString("\n") { "${it.name} · ${it.size} بایت" }
+                }
+            }.getOrElse { "فهرست APKها قابل خواندن نیست: ${it.message ?: "خطای ZIP"}" }
+            onBuildOutput("خروجی: ${file.name} · ${file.length()} بایت\n" + artifactSummary)
+        }
+    }
 
     val zipPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -48,6 +77,25 @@ fun BuildManagerDialog(keys: SecureKeyStore, onDismiss: () -> Unit) {
             status = "فایل ZIP انتخاب شد."
         }
     }
+    val saveApk = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")) { uri ->
+        val source = artifactFile
+        val entryName = selectedApk
+        if (uri != null && source != null && entryName != null) scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    ZipFile(source).use { zip ->
+                        val entry = zip.getEntry(entryName) ?: error("APK entry not found")
+                        zip.getInputStream(entry).use { input ->
+                            context.contentResolver.openOutputStream(uri)?.use { output -> input.copyTo(output) }
+                                ?: error("فایل APK ذخیره نشد.")
+                        }
+                    }
+                }
+                status = "فایل APK ذخیره شد."
+            } catch (e: Exception) { status = "خطا در ذخیره APK: ${e.message ?: "نامشخص"}" }
+        }
+    }
+
     val saveArtifact = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         val source = artifactFile
         if (uri != null && source != null) scope.launch {
@@ -73,7 +121,16 @@ fun BuildManagerDialog(keys: SecureKeyStore, onDismiss: () -> Unit) {
                 OutlinedTextField(repo, { repo = it }, label = { Text("مخزن عمومی owner/name") }, singleLine = true)
                 OutlinedTextField(branch, { branch = it }, label = { Text("شاخه یا commit") }, singleLine = true)
                 OutlinedTextField(projectFolder, { projectFolder = it }, label = { Text("پوشه پروژه") }, singleLine = true)
-                OutlinedTextField(task, { task = it }, label = { Text("Gradle task") }, singleLine = true)
+                Box {
+                    OutlinedButton(onClick = { taskMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text("دستور امن: $task")
+                    }
+                    DropdownMenu(expanded = taskMenu, onDismissRequest = { taskMenu = false }) {
+                        listOf("tasks", "assembleDebug", "testDebugUnitTest", "lintDebug", "check", "clean").forEach { option ->
+                            DropdownMenuItem(text = { Text(option) }, onClick = { task = option; taskMenu = false })
+                        }
+                    }
+                }
                 Button(onClick = {
                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                     val values = "repository=$repo\nref=$branch\nproject_dir=$projectFolder\ngradle_task=$task"
@@ -84,6 +141,23 @@ fun BuildManagerDialog(keys: SecureKeyStore, onDismiss: () -> Unit) {
                 }
                 HorizontalDivider()
                 Text("ساخت ابری با آپلود ZIP", style = MaterialTheme.typography.titleSmall)
+                Text("ترمینال امن و Android SDK", style = MaterialTheme.typography.titleSmall)
+                Text("دستورات آزاد سیستم اجرا نمی‌شوند. فقط فرمان‌های Gradle مجاز در محیط ایزوله اجرا می‌شوند.", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = {
+                    scope.launch {
+                        try {
+                            sdkInfo = client.getEnvironment(cloudEndpoint, cloudToken)
+                            status = "محیط Android SDK آماده است."
+                        } catch (e: Exception) {
+                            sdkInfo = "بررسی SDK ناموفق بود: ${e.message ?: "نامشخص"}"
+                            status = sdkInfo
+                        }
+                    }
+                }, enabled = cloudEndpoint.isNotBlank() && cloudToken.isNotBlank() && !busy, modifier = Modifier.fillMaxWidth()) {
+                    Text("بررسی Android SDK / JDK / Gradle")
+                }
+                Text(sdkInfo.takeLast(1800), style = MaterialTheme.typography.bodySmall)
+
                 OutlinedTextField(cloudEndpoint, { cloudEndpoint = it }, label = { Text("آدرس HTTPS سرویس ساخت") }, singleLine = true)
                 OutlinedTextField(cloudToken, { cloudToken = it }, label = { Text("توکن سرویس ساخت") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
                 OutlinedTextField(cloudProjectDir, { cloudProjectDir = it }, label = { Text("پوشه پروژه داخل ZIP") }, singleLine = true)
@@ -108,12 +182,14 @@ fun BuildManagerDialog(keys: SecureKeyStore, onDismiss: () -> Unit) {
                             buildLog = ""
                             artifactFile = null
                             try {
-                                val token = keys.read("cloud_builder") ?: cloudToken.trim()
-                                val endpoint = prefs.getString("endpoint", null) ?: cloudEndpoint.trim().trimEnd('/')
+                                val token = cloudToken.trim()
+                                val endpoint = client.validateEndpoint(cloudEndpoint)
                                 val selected = zipUri ?: error("ابتدا فایل ZIP پروژه را انتخاب کن.")
                                 require(token.isNotBlank()) { "توکن سرویس ساخت ذخیره نشده است." }
+                                keys.save("cloud_builder", token)
+                                prefs.edit().putString("endpoint", endpoint).commit()
                                 status = "در حال بارگذاری پروژه..."
-                                val id = client.submitZip(endpoint, token, selected, cloudProjectDir.trim())
+                                val id = client.submitZip(endpoint, token, selected, cloudProjectDir.trim(), task)
                                 buildId = id
                                 status = "ساخت در صف قرار گرفت."
                                 var attempts = 0
@@ -127,9 +203,13 @@ fun BuildManagerDialog(keys: SecureKeyStore, onDismiss: () -> Unit) {
                                         "failed" -> "ساخت ناموفق بود: ${result.error ?: "خطای Gradle"}"
                                         else -> "وضعیت: ${result.status}"
                                     }
-                                    if (result.status == "completed" && result.artifactReady) {
-                                        artifactFile = client.downloadArtifact(endpoint, token, id)
-                                        status = "APK آماده دریافت است."
+                                    if (result.status == "completed") {
+                                        if (result.artifactReady) {
+                                            artifactFile = client.downloadArtifact(endpoint, token, id)
+                                            status = "APK آماده دریافت است."
+                                        } else {
+                                            status = "دستور Gradle با موفقیت تمام شد."
+                                        }
                                         break
                                     }
                                     if (result.status == "failed") break
@@ -146,8 +226,25 @@ fun BuildManagerDialog(keys: SecureKeyStore, onDismiss: () -> Unit) {
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(if (busy) "در حال ساخت..." else "شروع ساخت ابری") }
                 if (artifactFile != null) {
-                    Button(onClick = { saveArtifact.launch("android-code-agent-apks.zip") }, modifier = Modifier.fillMaxWidth()) {
-                        Text("ذخیره APKهای ساخته‌شده")
+                    Text("فایل‌های APK داخل خروجی:", style = MaterialTheme.typography.titleSmall)
+                    Text(artifactSummary, style = MaterialTheme.typography.bodySmall)
+                    if (apkEntries.isNotEmpty()) {
+                        Box {
+                            OutlinedButton(onClick = { apkMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text(selectedApk?.substringAfterLast('/') ?: "انتخاب APK")
+                            }
+                            DropdownMenu(expanded = apkMenu, onDismissRequest = { apkMenu = false }) {
+                                apkEntries.forEach { entry ->
+                                    DropdownMenuItem(text = { Text(entry.substringAfterLast('/')) }, onClick = { selectedApk = entry; apkMenu = false })
+                                }
+                            }
+                        }
+                        Button(onClick = { saveApk.launch(selectedApk?.substringAfterLast('/') ?: "app-debug.apk") }, modifier = Modifier.fillMaxWidth()) {
+                            Text("ذخیره فایل APK")
+                        }
+                    }
+                    OutlinedButton(onClick = { saveArtifact.launch("android-code-agent-apks.zip") }, modifier = Modifier.fillMaxWidth()) {
+                        Text("ذخیره ZIP کامل خروجی")
                     }
                 }
                 Text(status, style = MaterialTheme.typography.bodySmall)
