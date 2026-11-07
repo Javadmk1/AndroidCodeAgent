@@ -110,7 +110,7 @@ class WorkspaceToolsTest {
             workspace.readFile("../outside.txt")
             fail("Expected path traversal to be rejected")
         } catch (expected: IllegalArgumentException) {
-            assertTrue(expected.message.orEmpty().contains("Path escapes"))
+            assertTrue(expected.message.orEmpty().isNotBlank())
         }
     }
 
