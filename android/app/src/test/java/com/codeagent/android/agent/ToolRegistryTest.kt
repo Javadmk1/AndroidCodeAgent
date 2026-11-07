@@ -50,6 +50,24 @@ class ToolRegistryTest {
     }
 
     @Test
+    fun toolReturnsStructuredErrorForInvalidWorkspacePath() = runBlocking {
+        val workspaceDir = newWorkspaceDir()
+        try {
+            val registry = ToolRegistry(WorkspaceTools(workspaceDir))
+            val result = registry.execute(
+                "read_file",
+                JSONObject().put("path", "../outside.txt"),
+                approveWrite = { _, _ -> false }
+            )
+            assertFalse(result.getBoolean("ok"))
+            assertTrue(result.optString("error").isNotBlank())
+            assertEquals("read_file", result.optString("tool"))
+        } finally {
+            workspaceDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun undoRequiresApprovalAndRestoresPreviousVersion() = runBlocking {
         val workspaceDir = newWorkspaceDir()
         try {

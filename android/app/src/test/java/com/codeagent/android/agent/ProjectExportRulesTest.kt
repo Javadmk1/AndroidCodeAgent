@@ -19,7 +19,12 @@ class ProjectExportRulesTest {
             "private/id_rsa",
             ".npmrc",
             "config/credentials.json",
-            "config/secrets.yaml"
+            "config/secrets.yaml",
+            ".ssh/id_ed25519",
+            ".codeagent-history/old-source.kt",
+            "config/service-account-prod.json",
+            "app/.env.production.local",
+            "signing/release.mobileprovision"
         ).forEach { path -> assertTrue("$path must be excluded", ProjectExportRules.isSensitivePath(path)) }
     }
 

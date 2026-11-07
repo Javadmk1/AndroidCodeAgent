@@ -74,7 +74,7 @@ class BuildProjectService(
     private fun createArchive(root: File, output: File) {
         var count = 0
         var total = 0L
-        val excluded = setOf(".git", ".gradle", ".idea", ".kotlin", "build", "local.properties")
+        val excluded = setOf(".git", ".gradle", ".idea", ".kotlin", "build", "local.properties", ".codeagent-history", ".ssh")
         ZipOutputStream(output.outputStream().buffered()).use { zip ->
             root.walkTopDown().forEach { file ->
                 val relative = root.toPath().relativize(file.toPath()).toString()

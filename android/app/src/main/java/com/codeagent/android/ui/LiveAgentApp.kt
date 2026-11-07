@@ -144,9 +144,6 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     val client = remember { LlmClient() }
     val connectionTester = remember { ApiConnectionTester() }
     val chatListState = rememberLazyListState()
-    LaunchedEffect(lines.size, lines.lastOrNull()?.text, busy) {
-        if (lines.isNotEmpty()) chatListState.animateScrollToItem(lines.lastIndex)
-    }
     val projectStore = remember(context) { ProjectStore(context) }
     val workQueueStore = remember(context) { WorkQueueStore(context) }
     var projects by remember(projectStore) { mutableStateOf(projectStore.loadProjects()) }
@@ -180,6 +177,9 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
             addAll(selected?.messages.orEmpty().map { LiveLine(it.role, it.content) })
             if (isEmpty()) add(LiveLine("assistant", "سلام. گفتگوی جدید آماده است؛ درخواستت را بنویس."))
         }
+    }
+    LaunchedEffect(lines.size, lines.lastOrNull()?.text, busy) {
+        if (lines.isNotEmpty()) chatListState.animateScrollToItem(lines.lastIndex)
     }
     val htmlPreview = lines.lastOrNull { it.role == "assistant" }?.text?.let { message ->
         Regex("""(?is)```(?:html)?\s*(.*?)```""").find(message)?.groupValues?.get(1)?.trim()
@@ -900,6 +900,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                         Spacer(Modifier.width(6.dp))
                         Text(if (testingConnection) "در حال آزمایش..." else "آزمایش اتصال API")
                     }
+                    Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
                     TextButton(onClick = { confirmDeleteKey = true }, enabled = keys.hasKey(config.provider)) { Text("حذف کلید ذخیره‌شده این سرویس") }
                 }
             },

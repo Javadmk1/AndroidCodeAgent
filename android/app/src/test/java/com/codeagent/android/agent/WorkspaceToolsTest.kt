@@ -35,6 +35,25 @@ class WorkspaceToolsTest {
         assertTrue(!workspace.undoFile("src/Main.kt"))
     }
 
+    @Test
+    fun hidesAndBlocksPrivateAgentHistoryAndSshDirectories() {
+        val root = temporaryFolder.newFolder("private-history-workspace")
+        val workspace = WorkspaceTools(root)
+        val history = java.io.File(root, ".codeagent-history").apply { mkdirs() }
+        java.io.File(history, "backup.kt").writeText("private old source")
+        val ssh = java.io.File(root, ".ssh").apply { mkdirs() }
+        java.io.File(ssh, "id_ed25519").writeText("private key")
+
+        assertTrue(workspace.listFiles().none { it.contains(".codeagent-history") || it.contains(".ssh") })
+        listOf(".codeagent-history/backup.kt", ".ssh/id_ed25519").forEach { path ->
+            try {
+                workspace.readFile(path)
+                fail("Expected private path to be blocked: " + path)
+            } catch (expected: IllegalArgumentException) {
+                assertTrue(expected.message.orEmpty().contains("مجاز نیست"))
+            }
+        }
+    }
 
     @Test
     fun textDiffShowsOnlyChangedLinesWithContext() {
