@@ -90,9 +90,12 @@ class TaskExecutionStore(context: Context) {
 
     init {
         locked {
-            val current = readAll()
-            val recovered = TaskExecutionCodec.recoverInterrupted(current, System.currentTimeMillis())
-            if (recovered != current) save(recovered)
+            if (!recoveryDone) {
+                val current = readAll()
+                val recovered = TaskExecutionCodec.recoverInterrupted(current, System.currentTimeMillis())
+                if (recovered != current) save(recovered)
+                recoveryDone = true
+            }
         }
     }
 
@@ -167,5 +170,6 @@ class TaskExecutionStore(context: Context) {
         const val KEY = "execution_records_v1"
         const val MAX_RECORDS = 100
         val LOCK = Any()
+        var recoveryDone = false
     }
 }
