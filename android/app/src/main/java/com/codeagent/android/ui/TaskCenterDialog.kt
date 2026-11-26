@@ -10,10 +10,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.codeagent.android.agent.WorkItem
 import com.codeagent.android.agent.WorkKind
+import com.codeagent.android.agent.TaskExecutionRecord
+import com.codeagent.android.agent.TaskExecutionStatus
 
 @Composable
 fun TaskCenterDialog(
     items: List<WorkItem>,
+    executions: List<TaskExecutionRecord>,
     onAddPrompt: (String) -> Unit,
     onAddPlanStep: (String, String) -> Unit,
     onToggle: (WorkItem, Boolean) -> Unit,
@@ -41,6 +44,31 @@ fun TaskCenterDialog(
                     OutlinedTextField(planTitle, { planTitle = it }, modifier = Modifier.fillMaxWidth(), label = { Text("عنوان مرحله") }, singleLine = true)
                     OutlinedTextField(planDetails, { planDetails = it }, modifier = Modifier.fillMaxWidth(), label = { Text("شرح و معیار تکمیل") }, minLines = 2)
                     Button(onClick = { onAddPlanStep(planTitle, planDetails); planTitle = ""; planDetails = "" }, enabled = planTitle.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("افزودن مرحله") }
+                }
+                HorizontalDivider()
+                Text("سوابق اجرای Agent", style = MaterialTheme.typography.titleSmall)
+                if (executions.isEmpty()) {
+                    Text("هنوز اجرایی ثبت نشده است.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                } else {
+                    executions.take(4).forEach { execution ->
+                        Card {
+                            Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(execution.prompt.lineSequence().first().take(90), style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    when (execution.status) {
+                                        TaskExecutionStatus.RUNNING -> "در حال اجرا"
+                                        TaskExecutionStatus.WAITING_APPROVAL -> "منتظر تأیید کاربر"
+                                        TaskExecutionStatus.SUCCEEDED -> "موفق"
+                                        TaskExecutionStatus.FAILED -> "ناموفق: " + execution.error.take(120)
+                                        TaskExecutionStatus.CANCELLED -> "لغو شده"
+                                        TaskExecutionStatus.INTERRUPTED -> "متوقف‌شده با بسته‌شدن برنامه؛ اجرای خودکار انجام نمی‌شود"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                        }
+                    }
                 }
                 HorizontalDivider()
                 Text("درخواست‌ها: " + items.count { it.kind == WorkKind.QUEUED_PROMPT && !it.completed } + " · مراحل: " + items.count { it.kind == WorkKind.PLAN_STEP && !it.completed }, style = MaterialTheme.typography.labelMedium)
