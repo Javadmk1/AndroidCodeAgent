@@ -19,6 +19,8 @@ class ToolRegistry(
         JSONObject().put("ok", false).put("error", "Task queue is not configured")
     }
 ) {
+    private val permissionPolicy: AgentPermissionPolicy = AgentPermissionPolicy()
+
     suspend fun execute(
         toolName: String,
         arguments: JSONObject,
@@ -27,6 +29,9 @@ class ToolRegistry(
         onActivity: suspend (String) -> Unit = {}
     ): JSONObject {
         return try {
+        permissionPolicy.validate(toolName, arguments)?.let { reason ->
+            return JSONObject().put("ok", false).put("error", reason).put("tool", toolName)
+        }
         when (toolName) {
             "list_files" -> {
                 val path = arguments.optString("path", "")
