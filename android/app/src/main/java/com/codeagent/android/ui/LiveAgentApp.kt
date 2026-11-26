@@ -2,6 +2,7 @@ package com.codeagent.android.ui
 
 import com.codeagent.android.SecureKeyStore
 import com.codeagent.android.agent.AgentRuntime
+import com.codeagent.android.agent.AgentRuntimeFactory
 import com.codeagent.android.agent.ProjectTransfer
 import com.codeagent.android.agent.ProjectStore
 import com.codeagent.android.agent.BuildProjectService
@@ -161,20 +162,13 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     val transfer = remember(context, activeProjectId) { ProjectTransfer(context, workspaceDirectory) }
     val buildService = remember(context, keys) { BuildProjectService(context, keys) }
     val runtime = remember(workspaceTools, buildService, workQueueStore, activeProjectId) {
-        AgentRuntime(ToolRegistry(
-            workspaceTools,
-            buildProject = { task, report -> buildService.build(workspaceDirectory, task, report) },
-            createPlanStep = { title, details ->
-                val item = workQueueStore.addPlanStep(activeProjectId, title, details)
-                withContext(Dispatchers.Main.immediate) { workItems = workQueueStore.list(activeProjectId) }
-                org.json.JSONObject().put("ok", true).put("id", item.id).put("title", item.title)
-            },
-            queuePrompt = { queuedPrompt ->
-                val item = workQueueStore.addPrompt(activeProjectId, queuedPrompt)
-                withContext(Dispatchers.Main.immediate) { workItems = workQueueStore.list(activeProjectId) }
-                org.json.JSONObject().put("ok", true).put("id", item.id).put("title", item.title)
-            }
-        ))
+        AgentRuntimeFactory(buildService, workQueueStore).create(
+            workspace = workspaceTools,
+            projectDirectory = workspaceDirectory,
+            projectId = activeProjectId
+        ) { updatedItems ->
+            withContext(Dispatchers.Main.immediate) { workItems = updatedItems }
+        }
     }
     val lines = remember(historyStore, activeConversationId) {
         mutableStateListOf<LiveLine>().apply {
