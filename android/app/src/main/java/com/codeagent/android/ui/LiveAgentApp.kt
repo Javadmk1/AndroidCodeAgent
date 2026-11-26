@@ -1,15 +1,16 @@
 package com.codeagent.android.ui
 
 import com.codeagent.android.SecureKeyStore
-import com.codeagent.android.agent.AgentRuntime
+import com.codeagent.android.agent.AgentRuntimeFactory
 import com.codeagent.android.agent.ProjectTransfer
 import com.codeagent.android.agent.ProjectStore
 import com.codeagent.android.agent.BuildProjectService
-import com.codeagent.android.agent.ToolRegistry
 import com.codeagent.android.agent.WorkspaceTools
 import com.codeagent.android.agent.TextDiff
 import com.codeagent.android.agent.WorkQueueStore
 import com.codeagent.android.agent.WorkItem
+import com.codeagent.android.agent.TaskExecutionStore
+import com.codeagent.android.agent.TaskExecutionStatus
 import com.codeagent.android.agent.ParallelReviewCoordinator
 import com.codeagent.android.agent.ParallelReviewResult
 import com.codeagent.android.llm.*
@@ -129,6 +130,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     var transferBusy by remember { mutableStateOf(false) }
     var pendingZipUri by remember { mutableStateOf<Uri?>(null) }
     var activeJob by remember { mutableStateOf<Job?>(null) }
+    var activeJobProjectId by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf("API هنوز پیکربندی نشده است.") }
     val historyStore = remember(context) { MultiConversationStore(context) }
     val initialConversations = remember(historyStore) { historyStore.loadAll().ifEmpty { listOf(historyStore.create()) } }
@@ -146,9 +148,11 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     val chatListState = rememberLazyListState()
     val projectStore = remember(context) { ProjectStore(context) }
     val workQueueStore = remember(context) { WorkQueueStore(context) }
+    val taskExecutionStore = remember(context) { TaskExecutionStore(context) }
     var projects by remember(projectStore) { mutableStateOf(projectStore.loadProjects()) }
     var activeProjectId by remember(projectStore) { mutableStateOf(projectStore.activeProjectId()) }
     var workItems by remember(workQueueStore, activeProjectId) { mutableStateOf(workQueueStore.list(activeProjectId)) }
+    var executionItems by remember(taskExecutionStore, activeProjectId) { mutableStateOf(taskExecutionStore.list(activeProjectId)) }
     val activeProject = projects.firstOrNull { it.id == activeProjectId }
     val activeProjectName = activeProject?.name ?: "پروژه من"
     val workspaceDirectory = remember(context, activeProjectId) { projectStore.directory(activeProjectId) }
@@ -156,20 +160,13 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
     val transfer = remember(context, activeProjectId) { ProjectTransfer(context, workspaceDirectory) }
     val buildService = remember(context, keys) { BuildProjectService(context, keys) }
     val runtime = remember(workspaceTools, buildService, workQueueStore, activeProjectId) {
-        AgentRuntime(ToolRegistry(
-            workspaceTools,
-            buildProject = { task, report -> buildService.build(workspaceDirectory, task, report) },
-            createPlanStep = { title, details ->
-                val item = workQueueStore.addPlanStep(activeProjectId, title, details)
-                withContext(Dispatchers.Main.immediate) { workItems = workQueueStore.list(activeProjectId) }
-                org.json.JSONObject().put("ok", true).put("id", item.id).put("title", item.title)
-            },
-            queuePrompt = { queuedPrompt ->
-                val item = workQueueStore.addPrompt(activeProjectId, queuedPrompt)
-                withContext(Dispatchers.Main.immediate) { workItems = workQueueStore.list(activeProjectId) }
-                org.json.JSONObject().put("ok", true).put("id", item.id).put("title", item.title)
-            }
-        ))
+        AgentRuntimeFactory(buildService, workQueueStore).create(
+            workspace = workspaceTools,
+            projectDirectory = workspaceDirectory,
+            projectId = activeProjectId
+        ) { updatedItems ->
+            withContext(Dispatchers.Main.immediate) { workItems = updatedItems }
+        }
     }
     val lines = remember(historyStore, activeConversationId) {
         mutableStateListOf<LiveLine>().apply {
@@ -396,8 +393,16 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                             pendingImageData = null
                                             pendingImageMime = null
                                             pendingAttachmentName = null
+                                            val runProjectId = activeProjectId
+                                            activeJobProjectId = runProjectId
                                             activeJob = scope.launch {
+                                                var executionId: String? = null
                                                 try {
+                                                    val execution = taskExecutionStore.start(runProjectId, question)
+                                                    executionId = execution.id
+                                                    withContext(Dispatchers.Main.immediate) {
+                                                        executionItems = taskExecutionStore.list(runProjectId)
+                                                    }
                                                     val result = runtime.run(
                                                         config = config,
                                                         apiKey = secret,
@@ -425,6 +430,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                             }
                                                         },
                                                         approveWrite = { path, content ->
+                                                            executionId?.let { id -> taskExecutionStore.update(id, TaskExecutionStatus.WAITING_APPROVAL) }
+                                                            withContext(Dispatchers.Main.immediate) { executionItems = taskExecutionStore.list(runProjectId) }
                                                             val gate = CompletableDeferred<Boolean>()
                                                             approvalPath = path
                                                             val currentContent = runCatching { workspaceTools.readFile(path) }.getOrDefault("")
@@ -432,32 +439,50 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                                 .getOrElse { "نمایش تفاوت ممکن نشد: ${it.message ?: "خطای نامشخص"}\n\nمحتوای پیشنهادی:\n$content" }
                                                                 .take(12000)
                                                             approvalDecision = gate
-                                                            try { gate.await() } finally {
+                                                            try {
+                                                                val approved = gate.await()
+                                                                executionId?.let { id -> taskExecutionStore.update(id, TaskExecutionStatus.RUNNING) }
+                                                                withContext(Dispatchers.Main.immediate) { executionItems = taskExecutionStore.list(runProjectId) }
+                                                                approved
+                                                            } finally {
                                                                 approvalPath = null
                                                                 approvalPreview = ""
                                                                 approvalDecision = null
                                                             }
                                                         },
                                                         approveBuild = { task ->
+                                                            executionId?.let { id -> taskExecutionStore.update(id, TaskExecutionStatus.WAITING_APPROVAL) }
+                                                            withContext(Dispatchers.Main.immediate) { executionItems = taskExecutionStore.list(runProjectId) }
                                                             val gate = CompletableDeferred<Boolean>()
                                                             buildApprovalTask = task
                                                             buildApprovalDecision = gate
-                                                            try { gate.await() } finally {
+                                                            try {
+                                                                val approved = gate.await()
+                                                                executionId?.let { id -> taskExecutionStore.update(id, TaskExecutionStatus.RUNNING) }
+                                                                withContext(Dispatchers.Main.immediate) { executionItems = taskExecutionStore.list(runProjectId) }
+                                                                approved
+                                                            } finally {
                                                                 buildApprovalTask = null
                                                                 buildApprovalDecision = null
                                                             }
                                                         }
                                                     )
                                                     val toolSummary = if (result.toolLog.isEmpty()) "" else "\n\nگزارش ابزارها:\n" + result.toolLog.joinToString("\n")
+                                                    executionId?.let { id -> taskExecutionStore.update(id, TaskExecutionStatus.SUCCEEDED, result.answer + toolSummary) }
+                                                    executionItems = taskExecutionStore.list(runProjectId)
                                                     result.toolLog.forEach { agentEvents.add(it) }
                                                     agentEvents.add("پاسخ ایجنت دریافت و ذخیره شد.")
                                                     lines[lines.lastIndex] = LiveLine("assistant", visibleAssistantText(result.answer) + toolSummary)
                                                     persistHistory()
                                                     status = "درخواست به پایان رسید."
                                                 } catch (e: CancellationException) {
+                                                    executionId?.let { id -> runCatching { taskExecutionStore.update(id, TaskExecutionStatus.CANCELLED, error = "عملیات توسط کاربر لغو شد.") } }
+                                                    executionItems = taskExecutionStore.list(runProjectId)
                                                     persistHistory()
                                                     status = "درخواست لغو شد."
                                                 } catch (e: Exception) {
+                                                    executionId?.let { id -> runCatching { taskExecutionStore.update(id, TaskExecutionStatus.FAILED, error = e.message ?: "خطای نامشخص") } }
+                                                    executionItems = taskExecutionStore.list(runProjectId)
                                                     lines[lines.lastIndex] = LiveLine("assistant", "خطا: " + (e.message ?: "نامشخص"))
                                                     persistHistory()
                                                     agentEvents.add("خطا: " + (e.message ?: "نامشخص"))
@@ -465,6 +490,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                                 } finally {
                                                     busy = false
                                                     activeJob = null
+                                                    activeJobProjectId = null
                                                 }
                                             }
                                         }
@@ -539,6 +565,8 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                         projectStore.activate(project.id)
                         activeProjectId = project.id
                         projects = projectStore.loadProjects()
+                        workItems = workQueueStore.list(project.id)
+                        executionItems = taskExecutionStore.list(project.id)
                         status = "پروژه فعال شد: " + project.name
                     },
                     onCreateProject = { name -> runCatching {
@@ -552,12 +580,23 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                         projects = projectStore.loadProjects()
                         status = "نام پروژه ذخیره شد."
                     }.onFailure { status = "خطای تغییر نام: " + (it.message ?: "نامشخص") } },
-                    onDeleteProject = { project -> runCatching {
-                        projectStore.delete(project.id)
-                        activeProjectId = projectStore.activeProjectId()
-                        projects = projectStore.loadProjects()
-                        status = "پروژه حذف شد."
-                    }.onFailure { status = "خطای حذف پروژه: " + (it.message ?: "نامشخص") } },
+                    onDeleteProject = { project -> scope.launch {
+                        try {
+                            if (activeJobProjectId == project.id) {
+                                status = "در حال لغو عملیات Agent پیش از حذف پروژه..."
+                                activeJob?.cancel()
+                                activeJob?.join()
+                            }
+                            projectStore.delete(project.id)
+                            activeProjectId = projectStore.activeProjectId()
+                            projects = projectStore.loadProjects()
+                            workItems = workQueueStore.list(activeProjectId)
+                            executionItems = taskExecutionStore.list(activeProjectId)
+                            status = "پروژه و سوابق وظایف آن حذف شدند."
+                        } catch (error: Exception) {
+                            status = "خطای حذف پروژه: " + (error.message ?: "نامشخص")
+                        }
+                    } },
                     onImport = { importLauncher.launch(null) },
                     onImportZip = { zipImportLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
                     onBrowse = { showWorkspace = true },
@@ -749,6 +788,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
 
     if (showTaskCenter) TaskCenterDialog(
         items = workItems,
+        executions = executionItems,
         onAddPrompt = { value ->
             runCatching { workQueueStore.addPrompt(activeProjectId, value) }
                 .onSuccess { workItems = workQueueStore.list(activeProjectId); status = "درخواست به صف ذخیره شد." }
