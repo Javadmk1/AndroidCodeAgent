@@ -47,6 +47,13 @@ object WorkItemCodec {
         }.takeLast(MAX_ITEMS)
     }.getOrDefault(emptyList())
 
+    /** Pure filtering helpers keep project lifecycle cleanup deterministic and testable. */
+    fun withoutProject(items: List<WorkItem>, projectId: String): List<WorkItem> =
+        items.filterNot { it.projectId == projectId }
+
+    fun forProjects(items: List<WorkItem>, projectIds: Set<String>): List<WorkItem> =
+        items.filter { it.projectId in projectIds }
+
     private const val MAX_ITEMS = 300
 }
 
@@ -77,6 +84,19 @@ class WorkQueueStore(context: Context) {
             WorkKind.PLAN_STEP, false, System.currentTimeMillis())
         append(item)
         return item
+    }
+
+    /** Removes every queued prompt and plan step owned by a deleted project. */
+    @Synchronized fun removeProject(projectId: String) {
+        require(validProject(projectId)) { "شناسه پروژه نامعتبر است." }
+        val current = WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]")
+        save(WorkItemCodec.withoutProject(current, projectId))
+    }
+
+    /** Startup reconciliation removes queue entries whose project metadata no longer exists. */
+    @Synchronized fun retainProjects(projectIds: Set<String>) {
+        val current = WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]")
+        save(WorkItemCodec.forProjects(current, projectIds))
     }
 
     @Synchronized fun setCompleted(id: String, completed: Boolean) {
