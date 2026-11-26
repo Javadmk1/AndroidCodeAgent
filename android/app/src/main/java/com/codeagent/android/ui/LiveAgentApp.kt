@@ -1,12 +1,10 @@
 package com.codeagent.android.ui
 
 import com.codeagent.android.SecureKeyStore
-import com.codeagent.android.agent.AgentRuntime
 import com.codeagent.android.agent.AgentRuntimeFactory
 import com.codeagent.android.agent.ProjectTransfer
 import com.codeagent.android.agent.ProjectStore
 import com.codeagent.android.agent.BuildProjectService
-import com.codeagent.android.agent.ToolRegistry
 import com.codeagent.android.agent.WorkspaceTools
 import com.codeagent.android.agent.TextDiff
 import com.codeagent.android.agent.WorkQueueStore
