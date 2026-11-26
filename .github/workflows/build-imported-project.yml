@@ -17,10 +17,16 @@ on:
         default: .
         type: string
       gradle_task:
-        description: Gradle task, normally assembleDebug
+        description: Allowed Gradle task
         required: true
         default: assembleDebug
-        type: string
+        type: choice
+        options:
+          - assembleDebug
+          - testDebugUnitTest
+          - lintDebug
+          - check
+          - tasks
 
 permissions:
   contents: read
@@ -40,9 +46,12 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SOURCE_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "repository must be owner/name"; exit 1; }
-          [[ -n "$SOURCE_REF" && "$SOURCE_REF" != -* && "$SOURCE_REF" != *".."* ]] || { echo "Invalid ref"; exit 1; }
+          [[ -n "$SOURCE_REF" && "$SOURCE_REF" != -* && "$SOURCE_REF" != *".."* && "$SOURCE_REF" != *$'\\n'* ]] || { echo "Invalid ref"; exit 1; }
           [[ "$PROJECT_DIR" == "." || ( "$PROJECT_DIR" != /* && "$PROJECT_DIR" != *".."* && "$PROJECT_DIR" =~ ^[A-Za-z0-9_./-]+$ ) ]] || { echo "Invalid project directory"; exit 1; }
-          [[ "$GRADLE_TASK" =~ ^[A-Za-z0-9:_-]+$ ]] || { echo "Invalid Gradle task"; exit 1; }
+          case "$GRADLE_TASK" in
+            assembleDebug|testDebugUnitTest|lintDebug|check|tasks) ;;
+            *) echo "Gradle task is not allowed"; exit 1 ;;
+          esac
 
       - name: Checkout public source project
         uses: actions/checkout@v4
@@ -52,6 +61,26 @@ jobs:
           path: source
           persist-credentials: false
 
+      - name: Verify project directory
+        shell: bash
+        env:
+          PROJECT_DIR: ${{ inputs.project_dir }}
+        run: |
+          set -euo pipefail
+          python - "$PROJECT_DIR" <<'PY'
+          import pathlib
+          import sys
+          root = pathlib.Path("source").resolve()
+          project = (root / sys.argv[1]).resolve()
+          if project != root and root not in project.parents:
+              raise SystemExit("Project directory resolves outside the checked-out repository")
+          if not project.is_dir():
+              raise SystemExit("Project directory does not exist")
+          markers = ("gradlew", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts")
+          if not any((project / marker).is_file() for marker in markers):
+              raise SystemExit("No Gradle project files found in the selected directory")
+          PY
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -59,6 +88,7 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
+        if: ${{ inputs.gradle_task != 'tasks' }}
         uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
@@ -69,33 +99,31 @@ jobs:
           gradle-version: '8.13'
           cache-disabled: true
 
-      - name: Build APK
+      - name: Run approved Gradle task
         shell: bash
         env:
           PROJECT_DIR: ${{ inputs.project_dir }}
           GRADLE_TASK: ${{ inputs.gradle_task }}
           BUILD_LOG: ${{ github.workspace }}/gradle-build.log
         run: |
-          set -o pipefail
+          set -euo pipefail
           cd "source/$PROJECT_DIR"
-          if [[ -x ./gradlew ]]; then
-            ./gradlew --no-daemon "$GRADLE_TASK" 2>&1 | tee "$BUILD_LOG"
+          if [[ -f ./gradlew ]]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon --console=plain "$GRADLE_TASK" 2>&1 | tee "$BUILD_LOG"
           else
-            gradle --no-daemon "$GRADLE_TASK" 2>&1 | tee "$BUILD_LOG"
+            gradle --no-daemon --console=plain "$GRADLE_TASK" 2>&1 | tee "$BUILD_LOG"
           fi
 
       - name: Collect APK outputs
-        id: collect
+        if: ${{ inputs.gradle_task == 'assembleDebug' }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build-output
-          find source -type f -path '*/build/outputs/apk/*/*.apk' -not -path '*/build/outputs/apk/androidTest/*' -exec cp --parents {} build-output/ \;
-          if ! find build-output -type f -name '*.apk' -print -quit | grep -q .; then
-            echo "No APK was produced. Check the Gradle task and project configuration."
-            exit 1
-          fi
-          find build-output -type f -name '*.apk' -print
+          find source -type f -path '*/build/outputs/apk/*/*.apk' -not -path '*/build/outputs/apk/androidTest/*' -exec cp --parents -- {} build-output/ \;
+          find build-output -type f -name '*.apk' -print -quit | grep -q . || { echo "No APK was produced"; exit 1; }
+          find build-output -type f -name '*.apk' -exec sha256sum {} \; > build-output/SHA256SUMS
 
       - name: Upload Gradle diagnostics
         if: always()
@@ -107,6 +135,7 @@ jobs:
           retention-days: 14
 
       - name: Upload APK artifacts
+        if: ${{ inputs.gradle_task == 'assembleDebug' }}
         uses: actions/upload-artifact@v4
         with:
           name: imported-project-apks

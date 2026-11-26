@@ -16,25 +16,27 @@ fun WorkspaceBrowser(workspaceDirectory: File, onDismiss: () -> Unit) {
     val tools = remember(workspaceDirectory) { WorkspaceTools(workspaceDirectory) }
     var refresh by remember { mutableIntStateOf(0) }
     var selectedPath by remember { mutableStateOf<String?>(null) }
+    var openTabs by remember { mutableStateOf(listOf<String>()) }
+    val tabDrafts = remember { mutableStateMapOf<String, String>() }
     var editorText by remember { mutableStateOf("") }
     var pendingSave by remember { mutableStateOf(false) }
     var newFileDialog by remember { mutableStateOf(false) }
     var newPath by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
 
-    val files = remember(refresh) {
+    val files = remember(workspaceDirectory, refresh) {
         workspaceDirectory.walkTopDown()
             .filter { it.isFile && it.length() <= 1_048_576L }
             .take(500)
             .map { workspaceDirectory.toPath().relativize(it.toPath()).toString().replace(File.separatorChar, '/') }
-            .filter { path -> path.split('/').none { it.startsWith(".") || it in setOf(".git", ".gradle", "build", ".idea") } }
+            .filter { path -> path.split('/').none { it in setOf(".git", ".gradle", "build", ".idea", ".kotlin", ".codeagent-history") } }
             .sorted()
             .toList()
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (selectedPath == null) "فایل‌های پروژه" else selectedPath!!) },
+        title = { Text(if (selectedPath == null) "فایل‌های پروژه" else "ویرایشگر چندتب") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (selectedPath == null) {
@@ -49,8 +51,10 @@ fun WorkspaceBrowser(workspaceDirectory: File, onDismiss: () -> Unit) {
                                 path,
                                 Modifier.fillMaxWidth().clickable {
                                     try {
-                                        editorText = tools.readFile(path)
+                                        selectedPath?.let { tabDrafts[it] = editorText }
+                                        editorText = tabDrafts[path] ?: tools.readFile(path)
                                         selectedPath = path
+                                        if (path !in openTabs) openTabs = openTabs + path
                                         error = null
                                     } catch (e: Exception) {
                                         error = e.message ?: "خواندن فایل ناموفق بود."
@@ -61,6 +65,38 @@ fun WorkspaceBrowser(workspaceDirectory: File, onDismiss: () -> Unit) {
                         }
                     }
                 } else {
+                    ScrollableTabRow(selectedTabIndex = openTabs.indexOf(selectedPath).coerceAtLeast(0)) {
+                        openTabs.forEach { tab ->
+                            Tab(
+                                selected = tab == selectedPath,
+                                onClick = {
+                                    selectedPath?.let { tabDrafts[it] = editorText }
+                                    selectedPath = tab
+                                    editorText = tabDrafts[tab] ?: tools.readFile(tab)
+                                },
+                                text = { Text(tab.substringAfterLast('/'), maxLines = 1) }
+                            )
+                        }
+                    }
+                    Text(selectedPath ?: "", style = MaterialTheme.typography.labelSmall)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(
+                            enabled = selectedPath?.let { tools.canUndo(it) } == true,
+                            onClick = {
+                                try {
+                                    val path = selectedPath ?: return@TextButton
+                                    if (tools.undoFile(path)) {
+                                        editorText = tools.readFile(path)
+                                        tabDrafts[path] = editorText
+                                        refresh++
+                                        error = "آخرین نسخه ذخیره‌شده بازیابی شد."
+                                    }
+                                } catch (e: Exception) {
+                                    error = e.message ?: "بازگردانی ناموفق بود."
+                                }
+                            }
+                        ) { Text("بازگردانی نسخه قبلی") }
+                    }
                     OutlinedTextField(
                         value = editorText,
                         onValueChange = { editorText = it },
@@ -81,7 +117,16 @@ fun WorkspaceBrowser(workspaceDirectory: File, onDismiss: () -> Unit) {
             }
         },
         dismissButton = {
-            if (selectedPath != null) TextButton(onClick = { selectedPath = null; error = null }) { Text("بازگشت") }
+            if (selectedPath != null) {
+                TextButton(onClick = { selectedPath?.let { tabDrafts[it] = editorText }; selectedPath = null; error = null }) { Text("فهرست فایل‌ها") }
+                TextButton(onClick = {
+                    val closing = selectedPath!!
+                    openTabs = openTabs - closing
+                    tabDrafts.remove(closing)
+                    selectedPath = openTabs.lastOrNull()
+                    editorText = selectedPath?.let { tabDrafts[it] ?: tools.readFile(it) } ?: ""
+                }) { Text("بستن تب") }
+            }
         }
     )
 
@@ -94,8 +139,8 @@ fun WorkspaceBrowser(workspaceDirectory: File, onDismiss: () -> Unit) {
                 TextButton(onClick = {
                     try {
                         tools.writeFile(selectedPath!!, editorText)
+                        tabDrafts[selectedPath!!] = editorText
                         pendingSave = false
-                        selectedPath = null
                         refresh++
                         error = null
                     } catch (e: Exception) {
