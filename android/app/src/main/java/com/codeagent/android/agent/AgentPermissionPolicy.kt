@@ -25,16 +25,16 @@ internal class AgentPermissionPolicy {
                 val path = arguments.optString("path", "")
                 if (path.isBlank()) return "File path is required"
                 validateOptionalPath(path)?.let { return it }
+                if (toolName == "write_file" || toolName == "diff_file") {
+                    val content = arguments.optString("content", "")
+                    if (content.toByteArray(Charsets.UTF_8).size > MAX_FILE_BYTES) {
+                        return "File content exceeds the 1 MB limit"
+                    }
+                }
             }
             "build_project" -> {
                 val task = arguments.optString("task", "assembleDebug")
                 if (task !in ALLOWED_BUILD_TASKS) return "Gradle task is not in the approved allowlist"
-            }
-            "write_file", "diff_file" -> {
-                val content = arguments.optString("content", "")
-                if (content.toByteArray(Charsets.UTF_8).size > MAX_FILE_BYTES) {
-                    return "File content exceeds the 1 MB limit"
-                }
             }
             "create_plan_step" -> {
                 val title = arguments.optString("title", "").trim()
