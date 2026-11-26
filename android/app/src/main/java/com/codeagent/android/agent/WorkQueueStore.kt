@@ -57,25 +57,30 @@ object WorkItemCodec {
     private const val MAX_ITEMS = 300
 }
 
+/**
+ * All instances share one process-wide lock. Instance-level @Synchronized is not
+ * sufficient because ProjectStore and the UI create separate WorkQueueStore objects.
+ */
 class WorkQueueStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("agent_work_queue", Context.MODE_PRIVATE)
 
-    @Synchronized fun list(projectId: String): List<WorkItem> =
+    fun list(projectId: String): List<WorkItem> = locked {
         WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]")
             .filter { it.projectId == projectId }
             .sortedBy { it.createdAt }
+    }
 
-    @Synchronized fun addPrompt(projectId: String, prompt: String): WorkItem {
+    fun addPrompt(projectId: String, prompt: String): WorkItem = locked {
         val text = prompt.trim()
         require(validProject(projectId)) { "شناسه پروژه نامعتبر است." }
         require(text.isNotBlank() && text.length <= 12_000) { "متن درخواست خالی یا بیش از حد طولانی است." }
         val item = WorkItem(UUID.randomUUID().toString(), projectId, text.lineSequence().first().take(80),
             text, WorkKind.QUEUED_PROMPT, false, System.currentTimeMillis())
         append(item)
-        return item
+        item
     }
 
-    @Synchronized fun addPlanStep(projectId: String, title: String, details: String = ""): WorkItem {
+    fun addPlanStep(projectId: String, title: String, details: String = ""): WorkItem = locked {
         val safeTitle = title.trim().take(120)
         require(validProject(projectId)) { "شناسه پروژه نامعتبر است." }
         require(safeTitle.isNotBlank()) { "عنوان مرحله را وارد کن." }
@@ -83,33 +88,34 @@ class WorkQueueStore(context: Context) {
         val item = WorkItem(UUID.randomUUID().toString(), projectId, safeTitle, details.trim(),
             WorkKind.PLAN_STEP, false, System.currentTimeMillis())
         append(item)
-        return item
+        item
     }
 
     /** Removes every queued prompt and plan step owned by a deleted project. */
-    @Synchronized fun removeProject(projectId: String) {
+    fun removeProject(projectId: String) = locked {
         require(validProject(projectId)) { "شناسه پروژه نامعتبر است." }
         val current = WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]")
         save(WorkItemCodec.withoutProject(current, projectId))
     }
 
     /** Startup reconciliation removes queue entries whose project metadata no longer exists. */
-    @Synchronized fun retainProjects(projectIds: Set<String>) {
+    fun retainProjects(projectIds: Set<String>) = locked {
         val current = WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]")
         save(WorkItemCodec.forProjects(current, projectIds))
     }
 
-    @Synchronized fun setCompleted(id: String, completed: Boolean) {
+    fun setCompleted(id: String, completed: Boolean) = locked {
         update { item -> if (item.id == id) item.copy(completed = completed) else item }
     }
 
-    @Synchronized fun remove(id: String) {
+    fun remove(id: String) = locked {
         save(WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]").filterNot { it.id == id })
     }
 
-    @Synchronized fun readPrompt(id: String): String? =
+    fun readPrompt(id: String): String? = locked {
         WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]")
             .firstOrNull { it.id == id && it.kind == WorkKind.QUEUED_PROMPT }?.prompt
+    }
 
     private fun append(item: WorkItem) {
         val items = WorkItemCodec.decode(prefs.getString(KEY, "[]") ?: "[]")
@@ -129,5 +135,10 @@ class WorkQueueStore(context: Context) {
 
     private fun validProject(id: String) = id.matches(Regex("[a-zA-Z0-9-]{8,64}"))
 
-    private companion object { const val KEY = "work_items_v1" }
+    private inline fun <T> locked(block: () -> T): T = synchronized(LOCK, block)
+
+    private companion object {
+        const val KEY = "work_items_v1"
+        val LOCK = Any()
+    }
 }
