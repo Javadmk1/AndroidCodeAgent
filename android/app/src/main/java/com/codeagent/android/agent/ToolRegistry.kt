@@ -66,9 +66,7 @@ class ToolRegistry(
             "queue_request" -> queuePrompt(arguments.getString("prompt"))
             "build_project" -> {
                 val task = arguments.optString("task", "assembleDebug")
-                if (task !in ALLOWED_BUILD_TASKS) {
-                    JSONObject().put("ok", false).put("error", "Gradle task is not in the approved allowlist")
-                } else if (!approveBuild(task)) {
+                if (!approveBuild(task)) {
                     JSONObject().put("ok", false).put("error", "User denied build execution")
                 } else {
                     buildProject(task, onActivity)
@@ -109,7 +107,4 @@ class ToolRegistry(
 
     fun toolNames(): List<String> = listOf("list_files", "read_file", "search_in_files", "diff_file", "undo_file", "write_file", "create_plan_step", "queue_request", "build_project")
 
-    private companion object {
-        val ALLOWED_BUILD_TASKS = setOf("tasks", "assembleDebug", "testDebugUnitTest", "lintDebug", "check", "clean")
-    }
 }

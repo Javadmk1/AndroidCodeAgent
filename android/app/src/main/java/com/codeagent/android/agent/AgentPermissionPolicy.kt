@@ -15,6 +15,12 @@ internal class AgentPermissionPolicy {
 
         when (toolName) {
             "list_files" -> validateOptionalPath(arguments.optString("path", ""))?.let { return it }
+            "search_in_files" -> {
+                val query = arguments.optString("query", "")
+                if (query.isBlank()) return "Search query is required"
+                if (query.length > MAX_SEARCH_QUERY) return "Search query is too long"
+                validateOptionalPath(arguments.optString("path", ""))?.let { return it }
+            }
             "read_file", "diff_file", "undo_file", "write_file" -> {
                 val path = arguments.optString("path", "")
                 if (path.isBlank()) return "File path is required"
@@ -23,6 +29,12 @@ internal class AgentPermissionPolicy {
             "build_project" -> {
                 val task = arguments.optString("task", "assembleDebug")
                 if (task !in ALLOWED_BUILD_TASKS) return "Gradle task is not in the approved allowlist"
+            }
+            "write_file", "diff_file" -> {
+                val content = arguments.optString("content", "")
+                if (content.toByteArray(Charsets.UTF_8).size > MAX_FILE_BYTES) {
+                    return "File content exceeds the 1 MB limit"
+                }
             }
             "create_plan_step" -> {
                 val title = arguments.optString("title", "").trim()
@@ -60,6 +72,8 @@ internal class AgentPermissionPolicy {
 
     private companion object {
         const val MAX_PATH_LENGTH = 240
+        const val MAX_SEARCH_QUERY = 500
+        const val MAX_FILE_BYTES = 1_048_576
         const val MAX_PLAN_TITLE = 160
         const val MAX_PLAN_DETAILS = 2_000
         const val MAX_QUEUED_PROMPT = 8_000

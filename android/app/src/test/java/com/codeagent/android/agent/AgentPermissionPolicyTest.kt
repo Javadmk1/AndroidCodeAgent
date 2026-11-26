@@ -29,6 +29,17 @@ class AgentPermissionPolicyTest {
             policy.validate("read_file", JSONObject().put("path", "a".repeat(241))))
     }
 
+    @Test fun validatesSearchPathsAndPayloadSizes() {
+        assertNotNull(policy.validate("search_in_files",
+            JSONObject().put("query", "token").put("path", "../outside")))
+        assertNotNull(policy.validate("search_in_files",
+            JSONObject().put("query", " ")))
+        assertNotNull(policy.validate("write_file",
+            JSONObject().put("path", "src/Main.kt").put("content", "x".repeat(1_048_577))))
+        assertNull(policy.validate("write_file",
+            JSONObject().put("path", "src/Main.kt").put("content", "ok")))
+    }
+
     @Test fun allowsOnlyExplicitGradleTasks() {
         assertNull(policy.validate("build_project", JSONObject().put("task", "assembleDebug")))
         assertEquals("Gradle task is not in the approved allowlist",
