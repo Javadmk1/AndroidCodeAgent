@@ -21,3 +21,4 @@ jobs:
           python -m py_compile cloud-builder/app.py
           cd cloud-builder
           python -c "from app import app; print(app.title)"
+          python -m unittest discover -s tests -v

@@ -31,12 +31,16 @@ Keep the API bound to localhost and expose it only through an HTTPS reverse prox
 
 ## API
 
-- `POST /v1/builds`: multipart form with `file` (ZIP) and optional `project_dir` (default `.`); requires `Authorization: Bearer <BUILDER_TOKEN>`.
+- `GET /v1/environment`: checks the worker image and reports the installed JDK, Gradle and Android SDK packages.
+- `POST /v1/builds`: multipart form with `file` (ZIP), optional `project_dir` (default `.`), and `gradle_task`; requires `Authorization: Bearer <BUILDER_TOKEN>`.
 - `GET /v1/builds/{build_id}`: returns queued/running/completed/failed status and a bounded log excerpt.
 - `GET /v1/builds/{build_id}/artifact`: downloads the APK ZIP after a successful build.
 
-The worker accepts ZIPs up to 100 MB, limits expanded files and file count, rejects path traversal and symbolic links, runs one build at a time, uses a 35-minute timeout and fixed `assembleDebug` task. Builds run in disposable Docker containers with CPU, memory and process limits, dropped Linux capabilities and no-new-privileges. No provider API keys or signing credentials are passed into the build container.
+The worker accepts ZIPs up to 100 MB, limits expanded files and file count, rejects path traversal and symbolic links, runs one build at a time, and uses a 35-minute timeout. Only these Gradle tasks are accepted: `tasks`, `assembleDebug`, `testDebugUnitTest`, `lintDebug`, `check`, and `clean`. Gradle output is streamed into the job log while the task runs. Only `assembleDebug` produces a downloadable APK ZIP. Builds run in disposable Docker containers with CPU, memory and process limits, dropped Linux capabilities and no-new-privileges. No provider API keys or signing credentials are passed into the build container.
 
 ## Important limitations
 
 The service stores job state in memory and temporary files on the VM. Restarting the API process loses job status; clean `/var/lib/aca-builds` periodically. Uploaded Gradle projects execute their own build scripts inside the container and have network access to download dependencies. Do not place secrets in uploaded projects. Use a dedicated VM and do not share it with sensitive workloads. This is a starting worker, not a hardened multi-tenant public SaaS service.
+
+
+The app also exposes a controlled Gradle console: it can inspect the SDK environment and execute only the allowlisted Gradle tasks. It does not provide a general-purpose shell or arbitrary command execution.

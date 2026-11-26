@@ -20,7 +20,9 @@ class AgentRuntime(
         apiKey: String,
         conversation: List<Pair<String, String>>,
         approveWrite: suspend (String, String) -> Boolean,
-        onText: suspend (String) -> Unit = {}
+        onText: suspend (String) -> Unit = {},
+        onActivity: suspend (String) -> Unit = {},
+        approveBuild: suspend (String) -> Boolean = { false }
     ): Result = withContext(Dispatchers.IO) {
         val anthropic = config.provider == "anthropic"
         val messages = JSONArray()
@@ -31,7 +33,8 @@ class AgentRuntime(
         val system = conversation.filter { it.first == "system" }.joinToString("\n") { it.second }
         val logs = mutableListOf<String>()
 
-        repeat(maxToolRounds) {
+        repeat(maxToolRounds) { round ->
+            onActivity("درخواست به مدل ارسال شد · مرحله ${round + 1}")
             val response = request(config, apiKey, messages, anthropic, system, onText)
             if (anthropic) {
                 val blocks = response.optJSONArray("content") ?: JSONArray()
@@ -47,8 +50,11 @@ class AgentRuntime(
                 for (use in toolUses) {
                     val name = use.optString("name")
                     val args = use.optJSONObject("input") ?: JSONObject()
-                    val result = registry.execute(name, args, approveWrite)
-                    logs += "$name: ${if (result.optBoolean("ok")) "انجام شد" else result.optString("error", "رد شد")}"
+                    onActivity("اجرای ابزار: $name")
+                    val result = registry.execute(name, args, approveWrite, approveBuild, onActivity)
+                    val logEntry = "$name: ${if (result.optBoolean("ok")) "انجام شد" else result.optString("error", "رد شد")}"
+                    logs += logEntry
+                    onActivity(logEntry)
                     results.put(JSONObject().put("type", "tool_result").put("tool_use_id", use.optString("id")).put("content", result.toString()))
                 }
                 messages.put(JSONObject().put("role", "user").put("content", results))
@@ -65,8 +71,11 @@ class AgentRuntime(
                     val function = call.optJSONObject("function") ?: error("Malformed tool call")
                     val name = function.optString("name")
                     val args = JSONObject(function.optString("arguments", "{}"))
+                    onActivity("اجرای ابزار: $name")
                     val result = registry.execute(name, args, approveWrite)
-                    logs += "$name: ${if (result.optBoolean("ok")) "انجام شد" else result.optString("error", "رد شد")}"
+                    val logEntry = "$name: ${if (result.optBoolean("ok")) "انجام شد" else result.optString("error", "رد شد")}"
+                    logs += logEntry
+                    onActivity(logEntry)
                     messages.put(JSONObject().put("role", "tool").put("tool_call_id", call.optString("id")).put("content", result.toString()))
                 }
             }
@@ -277,7 +286,9 @@ class AgentRuntime(
         Triple("search_in_files", "Search text inside project files.",
             JSONObject("""{"type":"object","properties":{"query":{"type":"string"},"path":{"type":"string"}},"required":["query"]}""")),
         Triple("write_file", "Create or replace a UTF-8 text file. User approval is required.",
-            JSONObject("""{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}"""))
+            JSONObject("""{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}""")),
+        Triple("build_project", "Run an approved Gradle task in the isolated Android SDK build service. Use assembleDebug to produce an APK. User approval is required.",
+            JSONObject("""{"type":"object","properties":{"task":{"type":"string","enum":["assembleDebug","testDebugUnitTest","lintDebug","check","tasks","clean"]}}}"""))
     )
 
     private fun anthropicTools(): JSONArray = JSONArray().apply {
