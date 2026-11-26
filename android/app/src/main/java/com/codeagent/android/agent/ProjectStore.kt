@@ -12,6 +12,7 @@ class ProjectStore(context: Context) {
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("project_store", Context.MODE_PRIVATE)
     private val root = File(app.filesDir, "projects")
+    private val workQueue = WorkQueueStore(app)
 
     init {
         check(root.exists() || root.mkdirs()) { "ساخت فضای پروژه‌ها ناموفق بود." }
@@ -36,6 +37,8 @@ class ProjectStore(context: Context) {
             } else if (items.none { it.id == activeProjectId() }) {
                 prefs.edit().putString(KEY_ACTIVE, items.first().id).commit()
             }
+            // Reconcile persisted work with the surviving project catalogue on every launch.
+            workQueue.retainProjects(loadProjects().map { it.id }.toSet())
         }
     }
 
@@ -92,6 +95,8 @@ class ProjectStore(context: Context) {
         require(items.size > 1) { "حداقل یک پروژه باید باقی بماند." }
         require(items.any { it.id == id }) { "پروژه پیدا نشد." }
         check(directory(id).deleteRecursively()) { "حذف فایل‌های پروژه ناموفق بود." }
+        // Queue data is project-scoped; purge it before publishing the new catalogue.
+        workQueue.removeProject(id)
         val remaining = items.filterNot { it.id == id }
         write(remaining)
         if (activeProjectId() == id) check(prefs.edit().putString(KEY_ACTIVE, remaining.first().id).commit())
