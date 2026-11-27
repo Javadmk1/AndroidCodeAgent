@@ -8,7 +8,6 @@ import org.json.JSONObject
  * payload. The marker is an internal transport detail and is never sent as text.
  */
 internal object LlmRequestBodyBuilder {
-    private const val IMAGE_MARKER = Regex("""\\n?\\[\\[IMAGE:([^:\\]]+):([A-Za-z0-9+/=]+)\\]\\]""")
     private const val MAX_IMAGE_BASE64_CHARS = 6 * 1024 * 1024
     private val supportedImageTypes = setOf("image/jpeg", "image/png", "image/webp", "image/gif")
 
@@ -20,8 +19,7 @@ internal object LlmRequestBodyBuilder {
                 messages.forEach { message ->
                     val image = if (message.role == "user") imageFrom(message.content) else null
                     val content: Any = if (image == null) message.content else JSONArray().apply {
-                        val text = image.first
-                        if (text.isNotBlank()) put(JSONObject().put("type", "text").put("text", text))
+                        if (image.first.isNotBlank()) put(JSONObject().put("type", "text").put("text", image.first))
                         put(JSONObject().put("type", "image_url").put(
                             "image_url", JSONObject().put("url", "data:${image.second};base64,${image.third}")
                         ))
@@ -36,15 +34,14 @@ internal object LlmRequestBodyBuilder {
             put("model", config.model)
             put("max_tokens", 4096)
             put("stream", true)
-            val system = messages.filter { it.role == "system" }.joinToString("\\n") { it.content }
+            val system = messages.filter { it.role == "system" }.joinToString("\n") { it.content }
             if (system.isNotBlank()) put("system", system)
             put("messages", JSONArray().apply {
                 messages.filter { it.role != "system" }.forEach { message ->
                     val role = if (message.role == "assistant") "assistant" else "user"
                     val image = if (role == "user") imageFrom(message.content) else null
                     val content: Any = if (image == null) message.content else JSONArray().apply {
-                        val text = image.first
-                        if (text.isNotBlank()) put(JSONObject().put("type", "text").put("text", text))
+                        if (image.first.isNotBlank()) put(JSONObject().put("type", "text").put("text", image.first))
                         put(JSONObject().put("type", "image").put(
                             "source", JSONObject()
                                 .put("type", "base64")
@@ -58,15 +55,24 @@ internal object LlmRequestBodyBuilder {
         }
 
     private fun imageFrom(content: String): Triple<String, String, String>? {
-        val match = IMAGE_MARKER.find(content) ?: return null
-        val mime = match.groupValues[1].lowercase()
-        val data = match.groupValues[2]
+        val markerStart = content.indexOf("[[IMAGE:")
+        if (markerStart < 0) return null
+        val markerEnd = content.indexOf("]]", markerStart + 8)
+        require(markerEnd >= 0) { "داده پیوست تصویر ناقص است." }
+        val payload = content.substring(markerStart + 8, markerEnd)
+        val separator = payload.indexOf(':')
+        require(separator > 0) { "قالب پیوست تصویر معتبر نیست." }
+        val mime = payload.substring(0, separator).lowercase()
+        val data = payload.substring(separator + 1)
         require(mime in supportedImageTypes) { "قالب تصویر پشتیبانی نمی‌شود: $mime" }
-        require(data.isNotBlank() && data.length <= MAX_IMAGE_BASE64_CHARS) {
+        require(data.isNotBlank() && data.length <= MAX_IMAGE_BASE64_CHARS &&
+            data.all { it.isLetterOrDigit() || it == '+' || it == '/' || it == '=' }) {
             "حجم تصویر از حد مجاز بیشتر است یا داده تصویر معتبر نیست."
         }
-        val text = (content.substring(0, match.range.first) + content.substring(match.range.last + 1))
-            .trim()
-        return Triple(text, mime, data)
+        var text = content.removeRange(markerStart, markerEnd + 2)
+        if (markerStart > 0 && text[markerStart - 1] == '\\n') {
+            text = text.removeRange(markerStart - 1, markerStart)
+        }
+        return Triple(text.trim(), mime, data)
     }
 }
