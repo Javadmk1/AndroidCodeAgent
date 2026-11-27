@@ -98,32 +98,22 @@ class AgentRuntime(
 
 
     private fun multimodalContent(raw: String, anthropic: Boolean): Any {
-        var remaining = raw
-        val images = mutableListOf<Pair<String, String>>()
-        while (true) {
-            val start = remaining.indexOf("[[IMAGE:")
-            if (start < 0) break
-            val end = remaining.indexOf("]]", start)
-            if (end < 0) break
-            val payload = remaining.substring(start + 8, end)
-            val separator = payload.indexOf(':')
-            if (separator > 0) {
-                val mime = payload.substring(0, separator)
-                val data = payload.substring(separator + 1)
-                if (mime.startsWith("image/") && data.isNotBlank()) images += mime to data
-            }
-            remaining = remaining.removeRange(start, end + 2)
-        }
-        if (images.isEmpty()) return raw
+        val parsed = MultimodalContentParser.parse(raw)
+        if (parsed.images.isEmpty()) return raw
+
         val blocks = JSONArray()
-        if (remaining.isNotBlank()) blocks.put(JSONObject().put("type", "text").put("text", remaining.trim()))
-        images.forEach { (mime, data) ->
+        if (parsed.text.isNotBlank()) {
+            blocks.put(JSONObject().put("type", "text").put("text", parsed.text))
+        }
+        parsed.images.forEach { image ->
             if (anthropic) {
                 blocks.put(JSONObject().put("type", "image").put("source",
-                    JSONObject().put("type", "base64").put("media_type", mime).put("data", data)))
+                    JSONObject().put("type", "base64")
+                        .put("media_type", image.mimeType)
+                        .put("data", image.base64Data)))
             } else {
                 blocks.put(JSONObject().put("type", "image_url").put("image_url",
-                    JSONObject().put("url", "data:$mime;base64,$data")))
+                    JSONObject().put("url", "data:${image.mimeType};base64,${image.base64Data}")))
             }
         }
         return blocks
