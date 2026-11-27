@@ -5,6 +5,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -20,7 +21,7 @@ class LlmClient {
         val worker = launch(Dispatchers.IO) {
             var connection: HttpURLConnection? = null
             try {
-                val anthropic = config.provider.equals("anthropic", ignoreCase = true)
+                val anthropic = config.provider == "anthropic"
                 val endpoint = ApiEndpoint.chat(config)
                 connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
@@ -37,30 +38,13 @@ class LlmClient {
                     }
                 }
 
-                val body = if (anthropic) {
-                    LlmRequestBodyBuilder.anthropicBody(config, messages)
-                } else {
-                    LlmRequestBodyBuilder.openAiBody(config, messages)
-                }
+                val body = if (anthropic) anthropicBody(config, messages) else openAiBody(config, messages)
                 connection.outputStream.bufferedWriter(Charsets.UTF_8).use { it.write(body.toString()) }
 
                 val code = connection.responseCode
                 if (code !in 200..299) {
-                    val errorText = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                    val detail = runCatching {
-                        val json = JSONObject(errorText)
-                        json.optJSONObject("error")?.optString("message")
-                            ?: json.optString("message").takeIf { it.isNotBlank() }
-                            ?: errorText
-                    }.getOrDefault(errorText)
-                    val hint = when (code) {
-                        401, 403 -> "کلید API یا مجوز دسترسی را بررسی کن."
-                        404 -> "آدرس endpoint یا نام مدل اشتباه است."
-                        413 -> "حجم درخواست یا تصویر از حد مجاز سرویس بیشتر است."
-                        429 -> "سهمیه یا محدودیت درخواست سرویس پر شده است."
-                        else -> "پاسخ ناموفق از سرویس دریافت شد."
-                    }
-                    throw IllegalStateException("HTTP $code · $hint ${detail.take(800)}")
+                    val errorText = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    throw IllegalStateException("API error $code: ${errorText.take(1200)}")
                 }
 
                 BufferedReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).use { reader ->
@@ -87,5 +71,29 @@ class LlmClient {
             }
         }
         awaitClose { worker.cancel() }
+    }
+
+    private fun openAiBody(config: ProviderConfig, messages: List<ChatMessage>) = JSONObject().apply {
+        put("model", config.model)
+        put("stream", true)
+        put("messages", JSONArray().apply {
+            messages.forEach { message ->
+                put(JSONObject().put("role", message.role).put("content", message.content))
+            }
+        })
+    }
+
+    private fun anthropicBody(config: ProviderConfig, messages: List<ChatMessage>) = JSONObject().apply {
+        put("model", config.model)
+        put("max_tokens", 4096)
+        put("stream", true)
+        val system = messages.filter { it.role == "system" }.joinToString("\n") { it.content }
+        if (system.isNotBlank()) put("system", system)
+        put("messages", JSONArray().apply {
+            messages.filter { it.role != "system" }.forEach { message ->
+                val role = if (message.role == "assistant") "assistant" else "user"
+                put(JSONObject().put("role", role).put("content", message.content))
+            }
+        })
     }
 }
