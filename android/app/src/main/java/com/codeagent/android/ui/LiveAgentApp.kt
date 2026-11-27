@@ -212,7 +212,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                 val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) cursor.getString(0) else null
                 } ?: "attachment"
-                val isImage = mime.startsWith("image/")
+                val isImage = mime.lowercase() in setOf("image/jpeg", "image/png", "image/webp", "image/gif")
                 val limit = if (isImage) 4 * 1024 * 1024 else 512 * 1024
                 val bytes = withContext(Dispatchers.IO) {
                     context.contentResolver.openInputStream(uri)?.use { input ->
@@ -371,7 +371,9 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                     activeJob?.cancel()
                                     status = "درخواست لغو شد."
                                 } else {
-                                    val question = prompt.trim()
+                                    val question = prompt.trim().ifBlank {
+                                        if (pendingImageData != null) "لطفاً تصویر پیوست‌شده را بررسی کن." else ""
+                                    }
                                     if (question.isNotEmpty()) {
                                         val secret = keys.read(config.provider)
                                         if (secret.isNullOrBlank()) {
@@ -497,7 +499,7 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                                     }
                                 }
                             },
-                            enabled = (prompt.isNotBlank() && !busy) || busy
+                            enabled = busy || prompt.isNotBlank() || pendingImageData != null
                         ) {
                             if (busy) Icon(Icons.Default.Close, "لغو درخواست")
                             else Icon(Icons.Default.Send, "ارسال")
