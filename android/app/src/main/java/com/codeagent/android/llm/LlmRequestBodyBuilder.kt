@@ -69,10 +69,7 @@ internal object LlmRequestBodyBuilder {
             data.all { it.isLetterOrDigit() || it == '+' || it == '/' || it == '=' }) {
             "حجم تصویر از حد مجاز بیشتر است یا داده تصویر معتبر نیست."
         }
-        var text = content.removeRange(markerStart, markerEnd + 2)
-        if (markerStart > 0 && text[markerStart - 1] == '\\n') {
-            text = text.removeRange(markerStart - 1, markerStart)
-        }
+        val text = content.removeRange(markerStart, markerEnd + 2)
         return Triple(text.trim(), mime, data)
     }
 }
