@@ -506,7 +506,43 @@ fun LiveAgentApp(keys: SecureKeyStore, configs: ProviderConfigStore) {
                         }
                     }
                     if (pendingAttachmentName != null) {
-                        Text("پیوست آماده: $pendingAttachmentName", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.AttachFile, contentDescription = null)
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        if (pendingImageData != null) "تصویر آماده ارسال" else "فایل متنی به پیام اضافه شد",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                    Text(
+                                        pendingAttachmentName.orEmpty(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1
+                                    )
+                                }
+                                if (pendingImageData != null) {
+                                    IconButton(
+                                        onClick = {
+                                            pendingImageData = null
+                                            pendingImageMime = null
+                                            pendingAttachmentName = null
+                                            status = "پیوست تصویر حذف شد."
+                                        },
+                                        enabled = !busy
+                                    ) {
+                                        Icon(Icons.Default.Close, contentDescription = "حذف تصویر")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
